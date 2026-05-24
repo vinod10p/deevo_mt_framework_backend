@@ -1,0 +1,143 @@
+# Project Context — deevo_mt_framework_backend
+
+Lightweight orientation for humans and AI assistants.
+**Coding rules live in [CONVENTIONS.md](CONVENTIONS.md)** — do not duplicate them here.
+Update this file when the **current step** or **scope** changes.
+
+---
+
+## Project
+
+| Item | Value |
+|------|-------|
+| **Project** | `deevo_mt_framework_backend` |
+| **Package** | `mtf` (Deevo Multi-Tenant Framework) |
+| **Stack** | FastAPI, SQLAlchemy 2.0, Pydantic v2, SQL Server, pyodbc, uv |
+| **Python** | >= 3.11 |
+| **Runs on** | `http://localhost:8000` |
+| **Conventions** | [CONVENTIONS.md](CONVENTIONS.md) — authoritative |
+
+---
+
+## Database (DDL)
+
+| Item | Decision |
+|------|----------|
+| **Tables** | Already exist on SQL Server — created and managed in **SSMS** |
+| **Canonical DDL** | [database_schema_v1.sql](database_schema_v1.sql) — SSMS export for `deevo_app_dev2` (v1) |
+| **ORM role** | SQLAlchemy models must **match** live DDL (not the other way around) |
+| **Alembic** | **Not used** in this repo for v1 — schema changes are scripts you run in SSMS |
+| **Runtime user** | `deevo_app` (read/write, no DDL) via `.env` |
+| **DDL user** | `deevo_ddl` only when you execute change scripts in SSMS (never in the app) |
+
+When you change a table in SSMS, update [database_schema_v1.sql](database_schema_v1.sql) (or add `database_schema_v2.sql`) and the matching `mtf/**/models` (and schemas/services) in the same change.
+
+---
+
+## Current Step
+
+Update statuses as work progresses.
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | Project scaffold, `pyproject.toml`, folder layout, docs | ✅ Done |
+| 2 | `shared/` — config, database, security, deps, exceptions, `db_integrity` | ✅ Done |
+| 2b | `shared/schemas.py` (shared Pydantic helpers, e.g. `row_version`) | ⬜ Pending |
+| 3 | `auth/` models | ✅ Done |
+| 4 | `tenant/` models | ✅ Done |
+| 5 | `auth/` schemas | ✅ Done |
+| 6 | `tenant/` schemas | ✅ Done |
+| 7 | `auth/` services | ✅ Done |
+| 8 | `tenant/` services | ✅ Done |
+| 9 | `auth/` + `tenant/` API routers | ✅ Done |
+| 10 | `audit/` — models, schemas, service, router | 🔄 In progress |
+| 11 | Verify SQLAlchemy models match [database_schema_v1.sql](database_schema_v1.sql) / SSMS | ⬜ Pending |
+| 12 | `main.py` — app entry, CORS, mount routers, `GET /health` | ✅ Done |
+| 13 | Tests — `conftest`, auth, tenant, audit (+ `@pytest.mark.integration`) | ⬜ Pending |
+
+---
+
+## Scope
+
+### In Scope
+
+| Python module | SQL schema | Tables |
+|---------------|-----------|--------|
+| `mtf/shared` | — | config, database, security, deps, exceptions, schemas |
+| `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
+| `mtf/tenant` | `tenant` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
+| `mtf/audit` | `audit` | `audit_log` (append-only) |
+
+### Out of Scope
+
+Product domains are **not** implemented here — `crm`, `email`, `txn`, `scout`, `flow`.
+These belong to `deevo_crm_backend` and other product backends.
+
+Products may share the same SQL Server instance but must never write to
+`auth.*`, `tenant.*`, or `audit.*` tables directly (only via this API).
+
+---
+
+## API Surface (mount points)
+
+| Prefix | Domain | Notes |
+|--------|--------|--------|
+| `GET /health` | — | No auth; load balancers |
+| `/api/auth` | `mtf.auth` | login, refresh, users, memberships |
+| `/api/tenant` | `mtf.tenant` | tenants, accounts, settings, addresses |
+| `/api/account` | `mtf.tenant` (portal) | account self-service — users menu (`tenant_account` scope) |
+| `/api/audit` | `mtf.audit` | read/create audit log (append-only) |
+
+Public (no Bearer token): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refresh`.
+
+---
+
+## Quick Pointers
+
+Full details and examples are in [CONVENTIONS.md](CONVENTIONS.md).
+
+| Topic | Value |
+|-------|-------|
+| All IDs | ULID `VARCHAR(26)` |
+| Login table | `auth.app_user` — not `auth.user` |
+| User scope values | `system` \| `tenant` \| `tenant_account` |
+| User type values | `system` \| `tenant` \| `tenant_account` |
+| Soft delete | `is_deleted` + `deleted_by`; every list query filters `is_deleted = False` |
+| Layering | `api/` (HTTP only) → `services/` → models |
+| Audit layout | Flat — `models.py`, `schemas.py`, `service.py` (no subpackages) |
+| Errors | `{"code": "DOMAIN_ENTITY_REASON", "message": "..."}` |
+| Concurrency | `row_version` (ROWVERSION) on all mutable tables |
+| Config | `DEEVO_*` vars in `.env`, loaded by `mtf/shared/config.py` |
+| DB users | Runtime `deevo_app`; DDL changes in SSMS as `deevo_ddl` (never in running app) |
+| Schema changes | SSMS only (no Alembic in this repo for v1) |
+| Tokens | Never stored raw — SHA-256 hashed as `BINARY(32)` |
+| Seed user | `id = 01HYSTEM00000000000000000`, `user_scope = system` |
+| Integration tests | `DEEVO_SKIP_DB_TESTS=1` or `pytest -m "not integration"` |
+
+---
+
+## Frontend Applications
+
+| App | Tech | Scope | Port |
+|-----|------|-------|------|
+| `deevo_admin` | Streamlit | `system` | 8501 |
+| `deevo_crm` | React | `tenant` | 3000 |
+| `deevo_portal` | React | `tenant_account` | 3001 |
+| `deevo_account_st` | Streamlit | `tenant_account` | 8502 |
+
+All frontends call this backend via HTTP at `http://localhost:8000` (and/or their product backend where applicable).
+
+---
+
+## Related Docs
+
+| File | Purpose |
+|------|---------|
+| [CONVENTIONS.md](CONVENTIONS.md) | Full coding rules — authoritative |
+| [LAYERING.md](LAYERING.md) | api, model, schema, service responsibilities |
+| [database_schema_v1.sql](database_schema_v1.sql) | Canonical MTF table DDL (auth, tenant, audit) |
+| [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
+| [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |
+| [AI_SKILLS.md](AI_SKILLS.md) | Cursor rules/skills rationale and reference |
+| [../.cursor/skills/](../.cursor/skills/) | Task workflow skills (schema change, add endpoint, dev/test) |
+| [../prompts/](../prompts/) | Historical codegen prompts |

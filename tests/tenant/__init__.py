@@ -1,0 +1,1 @@
+"""Tests — tenant domain."""

@@ -1,0 +1,33 @@
+---
+description: MTF Python conventions — read CONVENTIONS and PROJECT_CONTEXT before editing mtf/ code
+globs: mtf/**/*.py
+alwaysApply: false
+---
+
+# MTF Python
+
+Before changing code under `mtf/`, read:
+
+- [docs/CONVENTIONS.md](../../docs/CONVENTIONS.md) — authoritative rules (layering, IDs, errors, DB, auth)
+- [docs/PROJECT_CONTEXT.md](../../docs/PROJECT_CONTEXT.md) — scope, current step, in/out of scope modules
+
+## Non-negotiables
+
+- Imports: `mtf.*` only — never `app.*`
+- Layering: `api/` (HTTP only) → `services/` → models; no business logic in routers
+- IDs: ULID `VARCHAR(26)` generated in services, not in API layer
+- Soft delete: filter `is_deleted = False` on list/get; use `deleted_by` on delete
+- Errors: `mtf.shared.exceptions` helpers → `{"code": "DOMAIN_ENTITY_REASON", "message": "..."}`
+- SQL schemas in this repo: `auth`, `tenant`, `audit` only — no `crm`, `email`, `txn`, etc.
+- DB: sync SQLAlchemy + pyodbc; models match live SSMS DDL (no Alembic in v1)
+- Login table: `auth.app_user` — not `auth.user`
+
+## Layout
+
+| Module | Structure |
+|--------|-----------|
+| `auth`, `tenant` | Split: `api/`, `models/`, `schemas/`, `services/` per entity |
+| `audit` | Flat: `models.py`, `schemas.py`, `service.py` |
+| `shared` | config, database, security, deps, exceptions |
+
+For task workflows, use project skills in `.cursor/skills/` (schema change, add endpoint, dev/test).
