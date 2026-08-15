@@ -37,6 +37,10 @@ app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(tenant_account_portal_router, prefix="/api/account")
 app.include_router(audit_router, prefix="/api/audit")
 
+from mtf.tenant.api.tenant import mailbox_oauth_callback
+app.get("/api/v1/mailboxes/callback")(mailbox_oauth_callback)
+
+
 
 if __name__ == "__main__":
     import uvicorn

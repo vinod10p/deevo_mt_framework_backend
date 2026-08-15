@@ -1,12 +1,16 @@
 """HTTP routes — ``tenant.tenant`` resource."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from mtf.auth.services import TenantAccountUserService, TenantUserService
 from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination, require_scope
 from mtf.shared.exceptions import raise_if_not_found
 from mtf.tenant.schemas import (
+    MailboxCreate,
+    MailboxRead,
+    MailboxUpdate,
     TenantAccountAddressCreate,
     TenantAccountAddressRead,
     TenantAccountAddressUpdate,
@@ -26,12 +30,17 @@ from mtf.tenant.schemas import (
     TenantUserUpdate,
 )
 from mtf.tenant.services import (
+    MailboxService,
     TenantAccountAddressService,
     TenantAccountService,
     TenantService,
 )
 
 router = APIRouter()
+
+
+def get_mailbox_service(db: Session = Depends(get_db)) -> MailboxService:
+    return MailboxService(db)
 
 
 def get_tenant_service(db: Session = Depends(get_db)) -> TenantService:
@@ -211,6 +220,99 @@ def delete_tenant_user(
 ) -> Response:
     service.soft_delete_for_tenant(tenant_id, user_id, deleted_by=current_user.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{tenant_id}/mailboxes", response_model=list[MailboxRead])
+def list_tenant_mailboxes(
+    tenant_id: str,
+    skip: int = 0,
+    limit: int = 100,
+    _current_user: CurrentUser = Depends(require_scope("system")),
+    service: MailboxService = Depends(get_mailbox_service),
+) -> list[MailboxRead]:
+    return service.list_by_tenant(tenant_id, skip=skip, limit=limit)
+
+
+@router.post("/{tenant_id}/mailboxes", response_model=MailboxRead, status_code=status.HTTP_201_CREATED)
+def create_tenant_mailbox(
+    tenant_id: str,
+    payload: MailboxCreate,
+    current_user: CurrentUser = Depends(require_scope("system")),
+    service: MailboxService = Depends(get_mailbox_service),
+) -> MailboxRead:
+    return service.create_for_tenant(tenant_id, payload, created_by=current_user.user_id)
+
+
+@router.patch("/{tenant_id}/mailboxes/{mailbox_id}", response_model=MailboxRead)
+def update_tenant_mailbox(
+    tenant_id: str,
+    mailbox_id: str,
+    payload: MailboxUpdate,
+    current_user: CurrentUser = Depends(require_scope("system")),
+    service: MailboxService = Depends(get_mailbox_service),
+) -> MailboxRead:
+    mb = service.update_for_tenant(tenant_id, mailbox_id, payload, updated_by=current_user.user_id)
+    if not mb:
+        raise HTTPException(status_code=404, detail={"code": "MAILBOX_NOT_FOUND", "message": "Mailbox not found"})
+    return mb
+
+
+@router.delete("/{tenant_id}/mailboxes/{mailbox_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tenant_mailbox(
+    tenant_id: str,
+    mailbox_id: str,
+    current_user: CurrentUser = Depends(require_scope("system")),
+    service: MailboxService = Depends(get_mailbox_service),
+) -> Response:
+    success = service.delete_for_tenant(tenant_id, mailbox_id, deleted_by=current_user.user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail={"code": "MAILBOX_NOT_FOUND", "message": "Mailbox not found"})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/mailboxes/callback")
+def mailbox_oauth_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+    service: MailboxService = Depends(get_mailbox_service),
+) -> RedirectResponse:
+    import base64
+    import json
+
+    try:
+        state_decoded = base64.urlsafe_b64decode(state.encode()).decode()
+        state_dict = json.loads(state_decoded)
+        tenant_id = state_dict.get("tenant_id")
+        mailbox_id = state_dict.get("mailbox_id")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
+
+    if not tenant_id or not mailbox_id:
+        raise HTTPException(status_code=400, detail="State missing required fields")
+
+    cred = service.process_oauth_callback(tenant_id, mailbox_id, code)
+    if not cred:
+        raise HTTPException(status_code=400, detail="Failed to verify mailbox and exchange tokens")
+
+    # Redirect to Streamlit frontend Verification page
+    frontend_url = "http://localhost:8001/verification"
+    return RedirectResponse(url=frontend_url)
+
+
+
+
+@router.get("/{tenant_id}/mailboxes/{mailbox_id}/authorize")
+def authorize_mailbox_oauth(
+    tenant_id: str,
+    mailbox_id: str,
+    service: MailboxService = Depends(get_mailbox_service),
+) -> RedirectResponse:
+    mailbox = service.get_by_id(tenant_id, mailbox_id)
+    if not mailbox:
+        raise HTTPException(status_code=404, detail="Mailbox not found")
+
+    auth_url = service.get_authorization_url(tenant_id, mailbox_id)
+    return RedirectResponse(url=auth_url)
 
 
 @router.post(

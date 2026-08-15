@@ -125,6 +125,25 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Microsoft OAuth ───────────────────────────────────────────────────
+    microsoft_client_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("DEEVO_MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_ID"),
+    )
+    microsoft_client_secret: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("DEEVO_MICROSOFT_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET"),
+    )
+    microsoft_authority: str = Field(
+        default="https://login.microsoftonline.com/common",
+        validation_alias=AliasChoices("DEEVO_MICROSOFT_AUTHORITY", "MICROSOFT_AUTHORITY"),
+    )
+    microsoft_redirect_uri: str = Field(
+        default="http://localhost:8000/api/tenant/mailboxes/callback",
+        validation_alias=AliasChoices("DEEVO_MICROSOFT_REDIRECT_URI", "MICROSOFT_REDIRECT_URI"),
+    )
+
+
     @model_validator(mode="after")
     def split_server_and_port(self) -> Self:
         """Support CRM-style ``DB_SERVER=host,1433`` in a single variable."""

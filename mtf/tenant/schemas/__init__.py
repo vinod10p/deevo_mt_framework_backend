@@ -1,5 +1,10 @@
 """Pydantic schemas — tenant domain."""
 
+from mtf.tenant.schemas.mailbox import (
+    MailboxCreate,
+    MailboxRead,
+    MailboxUpdate,
+)
 from mtf.tenant.schemas.tenant import (
     TenantCreate,
     TenantPlanType,
@@ -32,6 +37,9 @@ from mtf.tenant.schemas.tenant_user import (
 )
 
 __all__ = [
+    "MailboxCreate",
+    "MailboxRead",
+    "MailboxUpdate",
     "TenantAccountAddressCreate",
     "TenantAccountAddressRead",
     "TenantAccountAddressUpdate",
@@ -53,3 +61,4 @@ __all__ = [
     "TenantUserRole",
     "TenantUserUpdate",
 ]
+
