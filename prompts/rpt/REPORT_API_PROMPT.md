@@ -5,6 +5,8 @@ on top of the `rpt` schema in [docs/rpt_schema_v5.sql](../docs/rpt_schema_v5.sql
 (`report_definition`, `report_column`, `report_criteria`, `report_saved_view`).
 Design background and the *why* behind the schema:
 [docs/REPORTING_FRAMEWORK_CONTEXT.md](../docs/REPORTING_FRAMEWORK_CONTEXT.md).
+Frontend contract for these endpoints (copied into each consuming app):
+[REPORT_FRONTEND_PROMPT.md](REPORT_FRONTEND_PROMPT.md).
 
 Follow this repo's conventions ([docs/CONVENTIONS.md](../docs/CONVENTIONS.md),
 [docs/LAYERING.md](../docs/LAYERING.md)): FastAPI, Pydantic v2, SQLAlchemy 2.0 (sync) +
