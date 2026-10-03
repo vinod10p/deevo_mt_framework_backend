@@ -9,8 +9,8 @@
 --     child metadata tables whose tenant is fully derived via report_id -> report_definition,
 --     never owned independently (see comment above each table for why storing it there was
 --     both redundant and, under a composite FK, silently unenforced for system-wide reports)
---   * On the three tables that DO carry a nullable tenant_id (report_definition and the two
---     saved-view tables), nullability is paired with an explicit scope_type
+--   * On the two tables that DO carry a nullable tenant_id (report_definition and
+--     report_saved_view), nullability is paired with an explicit scope_type
 --     ('system'/'tenant'[/'user']) enum + CHECK constraint, so the meaning is self-documenting
 --     rather than inferred from NULL alone — mirrors the auth.app_user exception pattern in
 --     the standard for system-level rows
@@ -20,10 +20,16 @@
 --   * Enum-like varchar columns use lowercase string values + named CK_ constraint
 --   * JSON columns use nvarchar(max) + ISJSON() CK_ constraint
 --   * All constraints/indexes named per PK_/UQ_/FK_/CK_/DF_/IX_ conventions
+--
+-- Requires SQL Server 2022+ / compatibility level 160+ (2-arg ISJSON on report_saved_view).
+-- Run in SSMS as deevo_ddl. Grants and the sample report are in rpt_seed_sample_report.sql.
 -- ============================================================================
 
-create schema rpt
-go 
+IF SCHEMA_ID(N'rpt') IS NULL
+    EXEC (N'CREATE SCHEMA rpt');
+GO
+
+
 -- ============================================================================
 -- 1. rpt.report_definition — the report registry
 -- ============================================================================
@@ -66,7 +72,7 @@ ALTER TABLE [rpt].[report_definition] WITH CHECK ADD
 
 ALTER TABLE [rpt].[report_definition] WITH CHECK ADD
     CONSTRAINT [CK_report_definition_scope_type] CHECK ([scope_type] IN ('system','tenant')),
-    -- explicit, self-documenting pairing — mirrors the scope pattern on report_saved_criteria/report_saved_layout
+    -- explicit, self-documenting pairing — mirrors the scope pattern on report_saved_view
     CONSTRAINT [CK_report_definition_scope] CHECK (
         ([scope_type] = 'system' AND [tenant_id] IS NULL) OR
         ([scope_type] = 'tenant' AND [tenant_id] IS NOT NULL)
@@ -231,97 +237,49 @@ CREATE NONCLUSTERED INDEX [IX_report_criteria_report_id] ON [rpt].[report_criter
 
 
 -- ============================================================================
--- 4. rpt.report_saved_criteria — System / Tenant / User scoped saved criteria presets
+-- 4. rpt.report_saved_view — System / Tenant / User scoped saved views
 -- ============================================================================
--- App-layer rule (not DB-enforced — a cross-table CHECK needs a UDF, avoided for write
--- perf): IF report_definition.scope_type = 'tenant' THEN this row's tenant_id MUST equal
--- report_definition.tenant_id. For a 'system' report, any tenant/user override is allowed.
--- This must land in the service layer with a test before saved criteria can be written.
-CREATE TABLE [rpt].[report_saved_criteria] (
+-- One saved view bundles criteria AND layout together under one name/scope —
+-- matching how QuickBooks/Excel/Tableau-style "save this view" actually works,
+-- and how users think about it (one save action, one named item in a list).
+-- An earlier version split these into report_saved_criteria + report_saved_layout
+-- to allow a tenant to govern layout independently of a user's personal filter —
+-- a real capability, but more flexibility than this product's target market
+-- (small/medium clients) needs, at the cost of a fragile pairing between two
+-- unlinked tables. Merged back into one table.
+--
+--
+-- APP-LAYER RULES (not DB-enforced — these need report_definition, which a CHECK
+-- constraint can't reference; must be validated in the service layer):
+--   1. If report_definition.scope_type = 'tenant':
+--        * this row's scope_type CANNOT be 'system'
+--        * this row's tenant_id MUST equal report_definition.tenant_id
+--   2. If report_definition.scope_type = 'system':
+--        * this row's scope_type may be 'system', 'tenant', or 'user'
+--   3. Effective default resolution order when opening a report:
+--        User default -> Tenant default -> System default
+--        -> report_column / report_criteria base defaults (if no saved view exists at all)
+--      Note: for a tenant-owned report, the 'system' tier never applies (per rule 1) —
+--      the chain is just User -> Tenant -> base defaults.
+--
+-- Deactivating or soft-deleting a row that is currently a default: the service layer
+-- must clear is_default in the SAME write as setting is_active=0 / is_deleted=1, or the
+-- write will fail CK_report_saved_view_default_state below (by design — it's the backstop
+-- for exactly this case, since the filtered unique indexes alone don't prevent it).
+CREATE TABLE [rpt].[report_saved_view] (
     [id]                varchar(26)     NOT NULL,
     [tenant_id]         varchar(26)     NULL,        -- NULL only when scope_type = 'system'
 
     [report_id]         varchar(26)     NOT NULL,
     [scope_type]        varchar(10)     NOT NULL,    -- system / tenant / user
     [user_id]           varchar(26)     NULL,        -- required only when scope_type = 'user'
-    [criteria_name]     nvarchar(200)   NOT NULL,
+    [view_name]         nvarchar(200)   NOT NULL,
     -- key-value pairs keyed by report_criteria.criteria_key for this report. Always include
     -- a top-level "version" int so the app can migrate older saved rows if the shape changes,
-    -- e.g. {"version": 1, "invoice_date": {"from": "...", "to": "..."}, "status": "Open"}
+    -- e.g. {"version": 1, "invoice_date": {"from": "...", "to": "..."}, "status": "Open"}.
+    -- A view saved with no criteria applied still stores a valid, empty {"version": 1}.
     [criteria_json]     nvarchar(max)   NOT NULL,
-    [is_default]        bit             NOT NULL,
-
-    [is_active]         bit             NOT NULL,
-    [is_deleted]        bit             NOT NULL,
-    [row_version]       timestamp       NOT NULL,
-    [created_at]        datetime2(3)    NOT NULL,
-    [updated_at]        datetime2(3)    NOT NULL,
-    [created_by]        varchar(26)     NULL,
-    [updated_by]        varchar(26)     NULL,
-    [deleted_by]        varchar(26)     NULL,
-
-    CONSTRAINT [PK_report_saved_criteria] PRIMARY KEY CLUSTERED ([id] ASC)
-);
-
-ALTER TABLE [rpt].[report_saved_criteria] ADD
-    CONSTRAINT [DF_report_saved_criteria_is_default] DEFAULT ((0))              FOR [is_default],
-    CONSTRAINT [DF_report_saved_criteria_is_active]  DEFAULT ((1))              FOR [is_active],
-    CONSTRAINT [DF_report_saved_criteria_is_deleted] DEFAULT ((0))              FOR [is_deleted],
-    CONSTRAINT [DF_report_saved_criteria_created_at] DEFAULT (sysutcdatetime()) FOR [created_at],
-    CONSTRAINT [DF_report_saved_criteria_updated_at] DEFAULT (sysutcdatetime()) FOR [updated_at];
-
-ALTER TABLE [rpt].[report_saved_criteria] WITH CHECK ADD
-    CONSTRAINT [FK_report_saved_criteria_report_id]  FOREIGN KEY ([report_id])  REFERENCES [rpt].[report_definition] ([id]),
-    CONSTRAINT [FK_report_saved_criteria_tenant_id]  FOREIGN KEY ([tenant_id])  REFERENCES [tenant].[tenant] ([id]),
-    CONSTRAINT [FK_report_saved_criteria_user_id]    FOREIGN KEY ([user_id])    REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_criteria_created_by] FOREIGN KEY ([created_by]) REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_criteria_updated_by] FOREIGN KEY ([updated_by]) REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_criteria_deleted_by] FOREIGN KEY ([deleted_by]) REFERENCES [auth].[app_user] ([id]);
-
-ALTER TABLE [rpt].[report_saved_criteria] WITH CHECK ADD
-    CONSTRAINT [CK_report_saved_criteria_scope] CHECK (
-        ([scope_type] = 'system' AND [tenant_id] IS NULL     AND [user_id] IS NULL) OR
-        ([scope_type] = 'tenant' AND [tenant_id] IS NOT NULL AND [user_id] IS NULL) OR
-        ([scope_type] = 'user'   AND [tenant_id] IS NOT NULL AND [user_id] IS NOT NULL)
-    ),
-    CONSTRAINT [CK_report_saved_criteria_json] CHECK (ISJSON([criteria_json]) = 1);
-
--- name uniqueness per scope tier
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_system] ON [rpt].[report_saved_criteria] ([report_id], [criteria_name])
-    WHERE [scope_type] = 'system' AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_tenant] ON [rpt].[report_saved_criteria] ([report_id], [tenant_id], [criteria_name])
-    WHERE [scope_type] = 'tenant' AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_user] ON [rpt].[report_saved_criteria] ([report_id], [tenant_id], [user_id], [criteria_name])
-    WHERE [scope_type] = 'user' AND [is_deleted] = 0;
-
--- at most one default per scope tier
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_system_default] ON [rpt].[report_saved_criteria] ([report_id])
-    WHERE [scope_type] = 'system' AND [is_default] = 1 AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_tenant_default] ON [rpt].[report_saved_criteria] ([report_id], [tenant_id])
-    WHERE [scope_type] = 'tenant' AND [is_default] = 1 AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_criteria_user_default] ON [rpt].[report_saved_criteria] ([report_id], [tenant_id], [user_id])
-    WHERE [scope_type] = 'user' AND [is_default] = 1 AND [is_deleted] = 0;
-
-CREATE NONCLUSTERED INDEX [IX_report_saved_criteria_tenant_id] ON [rpt].[report_saved_criteria] ([tenant_id], [is_deleted]);
-CREATE NONCLUSTERED INDEX [IX_report_saved_criteria_report_id] ON [rpt].[report_saved_criteria] ([report_id]);
-
-
--- ============================================================================
--- 5. rpt.report_saved_layout — same scope pattern as report_saved_criteria
--- ============================================================================
--- Same app-layer tenant-consistency rule as report_saved_criteria above (not DB-enforced):
--- IF report_definition.scope_type = 'tenant' THEN this row's tenant_id MUST equal
--- report_definition.tenant_id. For a 'system' report, any tenant/user override is allowed.
-CREATE TABLE [rpt].[report_saved_layout] (
-    [id]                varchar(26)     NOT NULL,
-    [tenant_id]         varchar(26)     NULL,        -- NULL only when scope_type = 'system'
-
-    [report_id]         varchar(26)     NOT NULL,
-    [scope_type]        varchar(10)     NOT NULL,    -- system / tenant / user
-    [user_id]           varchar(26)     NULL,        -- required only when scope_type = 'user'
-    [layout_name]       nvarchar(200)   NOT NULL,
-    -- column order/visibility/width/group-by/sort. Always include a top-level "version" int
-    -- so the app can migrate older saved layouts if the shape changes, e.g.
+    -- column order/visibility/width/group-by/sort. Same versioning convention, e.g.
     -- {"version": 1, "columns": [...], "sort": [...], "group": [...]}
     [layout_json]       nvarchar(max)   NOT NULL,
     [is_default]        bit             NOT NULL,
@@ -335,45 +293,63 @@ CREATE TABLE [rpt].[report_saved_layout] (
     [updated_by]        varchar(26)     NULL,
     [deleted_by]        varchar(26)     NULL,
 
-    CONSTRAINT [PK_report_saved_layout] PRIMARY KEY CLUSTERED ([id] ASC)
+    CONSTRAINT [PK_report_saved_view] PRIMARY KEY CLUSTERED ([id] ASC)
 );
 
-ALTER TABLE [rpt].[report_saved_layout] ADD
-    CONSTRAINT [DF_report_saved_layout_is_default] DEFAULT ((0))              FOR [is_default],
-    CONSTRAINT [DF_report_saved_layout_is_active]  DEFAULT ((1))              FOR [is_active],
-    CONSTRAINT [DF_report_saved_layout_is_deleted] DEFAULT ((0))              FOR [is_deleted],
-    CONSTRAINT [DF_report_saved_layout_created_at] DEFAULT (sysutcdatetime()) FOR [created_at],
-    CONSTRAINT [DF_report_saved_layout_updated_at] DEFAULT (sysutcdatetime()) FOR [updated_at];
+ALTER TABLE [rpt].[report_saved_view] ADD
+    CONSTRAINT [DF_report_saved_view_is_default] DEFAULT ((0))              FOR [is_default],
+    CONSTRAINT [DF_report_saved_view_is_active]  DEFAULT ((1))              FOR [is_active],
+    CONSTRAINT [DF_report_saved_view_is_deleted] DEFAULT ((0))              FOR [is_deleted],
+    CONSTRAINT [DF_report_saved_view_created_at] DEFAULT (sysutcdatetime()) FOR [created_at],
+    CONSTRAINT [DF_report_saved_view_updated_at] DEFAULT (sysutcdatetime()) FOR [updated_at];
 
-ALTER TABLE [rpt].[report_saved_layout] WITH CHECK ADD
-    CONSTRAINT [FK_report_saved_layout_report_id]  FOREIGN KEY ([report_id])  REFERENCES [rpt].[report_definition] ([id]),
-    CONSTRAINT [FK_report_saved_layout_tenant_id]  FOREIGN KEY ([tenant_id])  REFERENCES [tenant].[tenant] ([id]),
-    CONSTRAINT [FK_report_saved_layout_user_id]    FOREIGN KEY ([user_id])    REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_layout_created_by] FOREIGN KEY ([created_by]) REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_layout_updated_by] FOREIGN KEY ([updated_by]) REFERENCES [auth].[app_user] ([id]),
-    CONSTRAINT [FK_report_saved_layout_deleted_by] FOREIGN KEY ([deleted_by]) REFERENCES [auth].[app_user] ([id]);
+ALTER TABLE [rpt].[report_saved_view] WITH CHECK ADD
+    CONSTRAINT [FK_report_saved_view_report_id]  FOREIGN KEY ([report_id])  REFERENCES [rpt].[report_definition] ([id]),
+    CONSTRAINT [FK_report_saved_view_tenant_id]  FOREIGN KEY ([tenant_id])  REFERENCES [tenant].[tenant] ([id]),
+    CONSTRAINT [FK_report_saved_view_user_id]    FOREIGN KEY ([user_id])    REFERENCES [auth].[app_user] ([id]),
+    CONSTRAINT [FK_report_saved_view_created_by] FOREIGN KEY ([created_by]) REFERENCES [auth].[app_user] ([id]),
+    CONSTRAINT [FK_report_saved_view_updated_by] FOREIGN KEY ([updated_by]) REFERENCES [auth].[app_user] ([id]),
+    CONSTRAINT [FK_report_saved_view_deleted_by] FOREIGN KEY ([deleted_by]) REFERENCES [auth].[app_user] ([id]);
 
-ALTER TABLE [rpt].[report_saved_layout] WITH CHECK ADD
-    CONSTRAINT [CK_report_saved_layout_scope] CHECK (
+ALTER TABLE [rpt].[report_saved_view] WITH CHECK ADD
+    -- explicit enum check, matching the pattern on report_definition.scope_type
+    CONSTRAINT [CK_report_saved_view_scope_type] CHECK ([scope_type] IN ('system','tenant','user')),
+    CONSTRAINT [CK_report_saved_view_scope] CHECK (
         ([scope_type] = 'system' AND [tenant_id] IS NULL     AND [user_id] IS NULL) OR
         ([scope_type] = 'tenant' AND [tenant_id] IS NOT NULL AND [user_id] IS NULL) OR
         ([scope_type] = 'user'   AND [tenant_id] IS NOT NULL AND [user_id] IS NOT NULL)
     ),
-    CONSTRAINT [CK_report_saved_layout_json] CHECK (ISJSON([layout_json]) = 1);
+    -- requires SQL Server 2022+ / compatibility level 160+ for the 2-arg ISJSON form
+    CONSTRAINT [CK_report_saved_view_criteria_json] CHECK (ISJSON([criteria_json], OBJECT) = 1),
+    CONSTRAINT [CK_report_saved_view_layout_json]   CHECK (ISJSON([layout_json], OBJECT) = 1),
+    -- ISNULL is required: JSON_VALUE returns NULL for a missing or non-numeric "version", and
+    -- TRY_CONVERT(NULL) > 0 evaluates to UNKNOWN, which a CHECK constraint treats as a PASS —
+    -- without the ISNULL wrapper, {} and {"version":"abc"} would both silently slip through.
+    CONSTRAINT [CK_report_saved_view_criteria_version] CHECK (ISNULL(TRY_CONVERT(int, JSON_VALUE([criteria_json], '$.version')), 0) > 0),
+    CONSTRAINT [CK_report_saved_view_layout_version]   CHECK (ISNULL(TRY_CONVERT(int, JSON_VALUE([layout_json], '$.version')), 0) > 0),
+    -- backstop: a default row can never be inactive/deleted, independent of the filtered
+    -- unique indexes below (which only prevent TWO rows from both being default in a tier —
+    -- they don't stop one row from staying flagged default after being deactivated/deleted)
+    CONSTRAINT [CK_report_saved_view_default_state] CHECK (
+        [is_default] = 0 OR ([is_active] = 1 AND [is_deleted] = 0)
+    );
 
-CREATE UNIQUE INDEX [UQ_report_saved_layout_system] ON [rpt].[report_saved_layout] ([report_id], [layout_name])
+-- name uniqueness per scope tier
+CREATE UNIQUE INDEX [UQ_report_saved_view_system] ON [rpt].[report_saved_view] ([report_id], [view_name])
     WHERE [scope_type] = 'system' AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_layout_tenant] ON [rpt].[report_saved_layout] ([report_id], [tenant_id], [layout_name])
+CREATE UNIQUE INDEX [UQ_report_saved_view_tenant] ON [rpt].[report_saved_view] ([report_id], [tenant_id], [view_name])
     WHERE [scope_type] = 'tenant' AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_layout_user] ON [rpt].[report_saved_layout] ([report_id], [tenant_id], [user_id], [layout_name])
+CREATE UNIQUE INDEX [UQ_report_saved_view_user] ON [rpt].[report_saved_view] ([report_id], [tenant_id], [user_id], [view_name])
     WHERE [scope_type] = 'user' AND [is_deleted] = 0;
 
-CREATE UNIQUE INDEX [UQ_report_saved_layout_system_default] ON [rpt].[report_saved_layout] ([report_id])
-    WHERE [scope_type] = 'system' AND [is_default] = 1 AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_layout_tenant_default] ON [rpt].[report_saved_layout] ([report_id], [tenant_id])
-    WHERE [scope_type] = 'tenant' AND [is_default] = 1 AND [is_deleted] = 0;
-CREATE UNIQUE INDEX [UQ_report_saved_layout_user_default] ON [rpt].[report_saved_layout] ([report_id], [tenant_id], [user_id])
-    WHERE [scope_type] = 'user' AND [is_default] = 1 AND [is_deleted] = 0;
+-- at most one ACTIVE default per scope tier (is_active=1 added so this stays consistent
+-- with CK_report_saved_view_default_state above)
+CREATE UNIQUE INDEX [UQ_report_saved_view_system_default] ON [rpt].[report_saved_view] ([report_id])
+    WHERE [scope_type] = 'system' AND [is_default] = 1 AND [is_active] = 1 AND [is_deleted] = 0;
+CREATE UNIQUE INDEX [UQ_report_saved_view_tenant_default] ON [rpt].[report_saved_view] ([report_id], [tenant_id])
+    WHERE [scope_type] = 'tenant' AND [is_default] = 1 AND [is_active] = 1 AND [is_deleted] = 0;
+CREATE UNIQUE INDEX [UQ_report_saved_view_user_default] ON [rpt].[report_saved_view] ([report_id], [tenant_id], [user_id])
+    WHERE [scope_type] = 'user' AND [is_default] = 1 AND [is_active] = 1 AND [is_deleted] = 0;
 
-CREATE NONCLUSTERED INDEX [IX_report_saved_layout_tenant_id] ON [rpt].[report_saved_layout] ([tenant_id], [is_deleted]);
-CREATE NONCLUSTERED INDEX [IX_report_saved_layout_report_id] ON [rpt].[report_saved_layout] ([report_id]);
+CREATE NONCLUSTERED INDEX [IX_report_saved_view_tenant_id] ON [rpt].[report_saved_view] ([tenant_id], [is_deleted]);
+CREATE NONCLUSTERED INDEX [IX_report_saved_view_report_id] ON [rpt].[report_saved_view] ([report_id], [is_deleted]);

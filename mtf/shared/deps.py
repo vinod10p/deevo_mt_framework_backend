@@ -128,6 +128,27 @@ def require_scope(required_scope: UserScope) -> Callable[..., CurrentUser]:
     return checker
 
 
+_any_scope_checkers: dict[tuple[UserScope, ...], Callable[..., CurrentUser]] = {}
+
+
+def require_any_scope(*scopes: UserScope) -> Callable[..., CurrentUser]:
+    """Like :func:`require_scope`, but accepts any one of ``scopes``."""
+    key = tuple(sorted(set(scopes)))
+    cached = _any_scope_checkers.get(key)
+    if cached is not None:
+        return cached
+
+    allowed = set(key)
+
+    def checker(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if user.user_scope not in allowed:
+            forbidden("AUTH", "Insufficient permissions")
+        return user
+
+    _any_scope_checkers[key] = checker
+    return checker
+
+
 require_tenant_scope = require_scope("tenant")
 require_system_scope = require_scope("system")
 

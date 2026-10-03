@@ -14,10 +14,10 @@ For **project identity, current build step, and scope**, see [PROJECT_CONTEXT.md
 |-------|------|
 | **IDs** | ULID as `VARCHAR(26)`; generate in services |
 | **Table names** | Singular (`tenant`, `app_user`); login identity is **`auth.app_user`**, not `auth.user` |
-| **SQL schemas (this repo)** | `auth`, `tenant`, `audit` only |
+| **SQL schemas (this repo)** | `auth`, `tenant`, `audit`, `rpt` only |
 | **Soft delete** | `is_deleted` + `deleted_by`; never hard-delete mutable rows |
 | **Queries** | Filter `is_deleted = False` unless intentionally listing deleted rows |
-| **Layering** | `api/` → `services/` → models/DB; `audit` flat; `auth` / `tenant` split |
+| **Layering** | `api/` → `services/` → models/DB; `audit` flat; `auth` / `tenant` / `rpt` split |
 | **API routers** | One module per entity; `api/__init__.py` exports composed `router` |
 | **HTTP prefix** | `/api/<domain>/...`; health at `GET /health` (no auth) |
 | **Errors** | `{"code": "DOMAIN_ENTITY_REASON", "message": "..."}` — stable codes |
@@ -39,7 +39,7 @@ Products (e.g. `deevo_crm_backend`) run as separate services and share the same 
 
 - **Database:** Microsoft **SQL Server 2022 or later** (2025 Standard Edition in production)
 - **DB access (v1):** Synchronous SQLAlchemy `Session` + **pyodbc** only — no async engine in v1
-- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant` (framework-owned). Product schemas (`crm`, `email`, `txn`, `scout`, `flow`) are owned by their respective product backends.
+- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant`, `rpt` (framework-owned). Product schemas (`crm`, `email`, `txn`, `scout`, `flow`) are owned by their respective product backends.
 - **Python ORM:** SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`, `mapped_column`). Validation/serialisation: Pydantic v2 (`BaseModel`, `ConfigDict`).
 - **Package manager:** `uv`. Use `uv add <package>` to add dependencies.
 
@@ -111,6 +111,21 @@ deevo_mt_framework_backend/
 │   │       ├── tenant_setting.py
 │   │       ├── tenant_account.py
 │   │       └── tenant_account_address.py
+│   ├── rpt/                     ← generic reporting (see REPORTING_FRAMEWORK_CONTEXT.md)
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   └── report.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── report_definition.py
+│   │   │   ├── report_column.py
+│   │   │   └── report_criteria.py
+│   │   ├── schemas/
+│   │   │   ├── __init__.py
+│   │   │   └── report.py
+│   │   └── services/
+│   │       ├── __init__.py
+│   │       └── report_catalog.py
 │   └── audit/                   ← flat layout (append-only, no update/delete)
 │       ├── __init__.py
 │       ├── api/
@@ -148,6 +163,7 @@ deevo_mt_framework_backend/
 | `auth` | `auth` | Users, sessions, tenant-user and tenant-account-user membership |
 | `tenant` | `tenant` | Tenants, accounts, addresses, settings |
 | `audit` | `audit` | Immutable audit log for all data changes and auth events |
+| `rpt` | `rpt` | Generic report catalog (definitions, columns, criteria, saved views) and execution |
 | `shared` | — | Config, database, security, deps, exceptions, schemas |
 
 ---
@@ -174,6 +190,7 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 | `auth` | `deevo_mt_framework_backend` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
 | `tenant` | `deevo_mt_framework_backend` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `audit` | `deevo_mt_framework_backend` | `audit_log` |
+| `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql)) |
 | `crm` | `deevo_crm_backend` | leads, contacts, accounts, deals, activities |
 
 ### Database Users
@@ -200,6 +217,7 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 app.include_router(auth_router,   prefix="/api/auth")
 app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(audit_router,  prefix="/api/audit")
+app.include_router(rpt_router,    prefix="/api")   # entity routers carry /reports
 ```
 
 ---
@@ -218,7 +236,7 @@ Client → mtf/<domain>/api/<entity>.py → mtf/<domain>/services/<entity>.py �
 ### Layout Rules
 
 - `audit` uses **flat layout**: `models.py`, `schemas.py`, `service.py` at domain root. HTTP under `api/`.
-- All other domains (`auth`, `tenant`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
+- All other domains (`auth`, `tenant`, `rpt`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
 - Never keep both `models.py` and `models/` under the same domain — Python resolves one `models` name only.
 
 ---

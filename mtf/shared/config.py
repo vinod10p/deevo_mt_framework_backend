@@ -101,6 +101,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Reports (rpt) ─────────────────────────────────────────────────────
+    #: Statement timeout (seconds) for every report / lookup proc call.
+    #: Env: **`DEEVO_REPORT_QUERY_TIMEOUT_SECONDS`**.
+    report_query_timeout_seconds: int = Field(default=60, ge=1)
+
     # ── JWT ───────────────────────────────────────────────────────────────
     jwt_secret_key: SecretStr = Field(
         default=SecretStr("changeme"),

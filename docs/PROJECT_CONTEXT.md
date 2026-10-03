@@ -54,6 +54,9 @@ Update statuses as work progresses.
 | 11 | Verify SQLAlchemy models match [database_schema_v1.sql](database_schema_v1.sql) / SSMS | ⬜ Pending |
 | 12 | `main.py` — app entry, CORS, mount routers, `GET /health` | ✅ Done |
 | 13 | Tests — `conftest`, auth, tenant, audit (+ `@pytest.mark.integration`) | ⬜ Pending |
+| 14 | `rpt/` Phase 1 — report catalog read service (`GET /api/reports`, `GET /api/reports/{report_key}`) | ✅ Done |
+| 15 | `rpt/` Phase 2 — execution engine: lookups + `/run` (parameterized proc call, tenant session context) | ✅ Done |
+| 16 | `rpt/` Phase 3 — saved view CRUD (`report_saved_view`) + User → Tenant → System default | ⬜ Pending |
 
 ---
 
@@ -67,6 +70,7 @@ Update statuses as work progresses.
 | `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
 | `mtf/tenant` | `tenant` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
+| `mtf/rpt` | `rpt` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
 
 ### Out of Scope
 
@@ -74,7 +78,7 @@ Product domains are **not** implemented here — `crm`, `email`, `txn`, `scout`,
 These belong to `deevo_crm_backend` and other product backends.
 
 Products may share the same SQL Server instance but must never write to
-`auth.*`, `tenant.*`, or `audit.*` tables directly (only via this API).
+`auth.*`, `tenant.*`, `audit.*`, or `rpt.*` tables directly (only via this API).
 
 ---
 
@@ -87,6 +91,7 @@ Products may share the same SQL Server instance but must never write to
 | `/api/tenant` | `mtf.tenant` | tenants, accounts, settings, addresses |
 | `/api/account` | `mtf.tenant` (portal) | account self-service — users menu (`tenant_account` scope) |
 | `/api/audit` | `mtf.audit` | read/create audit log (append-only) |
+| `/api/reports` | `mtf.rpt` | report catalog metadata (`tenant` + `tenant_account` scope) |
 
 Public (no Bearer token): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refresh`.
 
@@ -136,6 +141,10 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [CONVENTIONS.md](CONVENTIONS.md) | Full coding rules — authoritative |
 | [LAYERING.md](LAYERING.md) | api, model, schema, service responsibilities |
 | [database_schema_v1.sql](database_schema_v1.sql) | Canonical MTF table DDL (auth, tenant, audit) |
+| [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) | Generic reporting framework design (`rpt`) |
+| [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL |
+| [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
+| [../prompts/REPORT_API_PROMPT.md](../prompts/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
 | [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |
 | [AI_SKILLS.md](AI_SKILLS.md) | Cursor rules/skills rationale and reference |

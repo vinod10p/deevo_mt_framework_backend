@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mtf.audit.api import router as audit_router
 from mtf.auth.api import router as auth_router
+from mtf.rpt.api import router as rpt_router
 from mtf.shared.config import get_settings
 from mtf.tenant.api import router as tenant_router
 from mtf.tenant.api.tenant_account_portal import router as tenant_account_portal_router
@@ -36,6 +37,7 @@ app.include_router(auth_router, prefix="/api/auth")
 app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(tenant_account_portal_router, prefix="/api/account")
 app.include_router(audit_router, prefix="/api/audit")
+app.include_router(rpt_router, prefix="/api")
 
 from mtf.tenant.api.tenant import mailbox_oauth_callback
 app.get("/api/v1/mailboxes/callback")(mailbox_oauth_callback)

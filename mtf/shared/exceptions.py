@@ -1,13 +1,18 @@
 """Reusable HTTPException helpers — consistent ``detail`` shape for every API error.
 
 ``detail`` is always ``{"code": "<SCREAMING_SNAKE>", "message": "<human text>"}`` as in CONVENTIONS.md.
+Validation errors (:func:`validation_error`) add a ``fields`` map.
 """
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from typing import Any, Never
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 
 def _detail(code: str, message: str) -> dict[str, str]:
@@ -94,6 +99,40 @@ def row_version_conflict(domain: str) -> Never:
         status_code=409,
         detail=_detail(f"{domain}_CONFLICT", msg),
     )
+
+
+def validation_error(code_prefix: str, message: str, fields: Mapping[str, str]) -> Never:
+    """Raise ``422`` with ``{code_prefix}_INVALID`` and a per-field error map.
+
+    Example:
+        ``validation_error("REPORT_CRITERIA", "Invalid criteria", {"status": "Bad value"})`` →
+        ``422 {"code": "REPORT_CRITERIA_INVALID", "message": "...", "fields": {"status": "..."}}``
+    """
+    raise HTTPException(
+        status_code=422,
+        detail={**_detail(f"{code_prefix}_INVALID", message), "fields": dict(fields)},
+    )
+
+
+def internal_error(
+    code_prefix: str,
+    message: str,
+    *,
+    log_message: str | None = None,
+    cause: BaseException | None = None,
+) -> Never:
+    """Log the real failure server-side, then raise ``500`` with ``{code_prefix}_FAILED``.
+
+    ``message`` goes to the client and must stay generic; put proc names, SQL text, and
+    driver errors in ``log_message`` / ``cause`` only.
+
+    Example:
+        ``internal_error("REPORT_EXECUTION", "The report could not be executed.", cause=exc)`` →
+        ``500 {"code": "REPORT_EXECUTION_FAILED", "message": "The report could not be executed."}``
+    """
+    code = f"{code_prefix}_FAILED"
+    logger.error("%s: %s", code, log_message or message, exc_info=cause)
+    raise HTTPException(status_code=500, detail=_detail(code, message)) from cause
 
 
 def raise_if_not_found(record: Any, code_prefix: str, message: str) -> None:
