@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 # MTF Add API Endpoint
 
-Read [docs/CONVENTIONS.md](../../docs/CONVENTIONS.md) (API, Layering, Errors) and [docs/PROJECT_CONTEXT.md](../../docs/PROJECT_CONTEXT.md) (scope, mount points).
+Read [docs/CONVENTIONS.md](../../../docs/CONVENTIONS.md) (API, Layering, Errors) and [docs/PROJECT_CONTEXT.md](../../../docs/PROJECT_CONTEXT.md) (scope, mount points).
 
 ## Scope check
 
@@ -66,13 +66,13 @@ Public (no Bearer): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refre
 
 ## Router registration
 
-**auth** — [mtf/auth/api/__init__.py](../../mtf/auth/api/__init__.py): compose entity routers into one `router`.
+**auth** — [mtf/auth/api/__init__.py](../../../mtf/auth/api/__init__.py): compose entity routers into one `router`.
 
-**tenant** — [mtf/tenant/api/__init__.py](../../mtf/tenant/api/__init__.py): static paths (e.g. staff) **before** `/{tenant_id}` routes.
+**tenant** — [mtf/tenant/api/__init__.py](../../../mtf/tenant/api/__init__.py): static paths (e.g. staff) **before** `/{tenant_id}` routes.
 
-**audit** — flat [mtf/audit/api/audit_log.py](../../mtf/audit/api/audit_log.py); append-only (no update/delete).
+**audit** — flat [mtf/audit/api/audit_log.py](../../../mtf/audit/api/audit_log.py); append-only (no update/delete).
 
-App mounts in [main.py](../../main.py):
+App mounts in [main.py](../../../main.py):
 
 ```python
 app.include_router(auth_router, prefix="/api/auth")
@@ -126,7 +126,7 @@ def create_foo(
 
 ## Integration test pattern
 
-Follow [tests/tenant/test_tenant_user_api_integration.py](../../tests/tenant/test_tenant_user_api_integration.py):
+Follow [tests/tenant/test_tenant_user_api_integration.py](../../../tests/tenant/test_tenant_user_api_integration.py):
 
 - `pytestmark = pytest.mark.integration`
 - `_skip_if_disabled()` checks `DEEVO_SKIP_DB_TESTS`

@@ -5,7 +5,7 @@ is, why the database is shaped the way it is, and the rules that keep "generic" 
 generic as new reports get added. The SQL in this folder ([rpt_schema_v5.sql](rpt_schema_v5.sql))
 is the source of truth for exact DDL — this document explains the *why* behind it and the
 architecture that sits on top of it. The endpoint-by-endpoint API spec (rules, error codes,
-request/response shapes, build order) is [prompts/REPORT_API_PROMPT.md](../prompts/REPORT_API_PROMPT.md).
+request/response shapes, build order) is [prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md).
 
 ## 1. What this is
 
@@ -259,4 +259,4 @@ rather than after a lot of code exists:
    procs. If this step requires touching application code, something leaked out of the
    metadata layer and should be caught here, not later.
 
-The detailed build order for steps 2–3 is in [prompts/REPORT_API_PROMPT.md](../prompts/REPORT_API_PROMPT.md).
+The detailed build order for steps 2–3 is in [prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md).

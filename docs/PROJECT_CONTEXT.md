@@ -144,7 +144,8 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) | Generic reporting framework design (`rpt`) |
 | [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL |
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
-| [../prompts/REPORT_API_PROMPT.md](../prompts/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
+| [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
+| [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
 | [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
 | [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |
 | [AI_SKILLS.md](AI_SKILLS.md) | Cursor rules/skills rationale and reference |

@@ -18,7 +18,7 @@
 -- IDs use the 01JRPTMTF prefix so they never collide with reports seeded by other apps
 -- (e.g. DeevoFlow's crm_deal_pipeline / sales_invoice_summary).
 --
--- Proc contracts (full spec: prompts/REPORT_API_PROMPT.md, "Stored procedure contract"):
+-- Proc contracts (full spec: prompts/rpt/REPORT_API_PROMPT.md, "Stored procedure contract"):
 --   Report proc: (@CriteriaJson nvarchar(max), @MaxRows int)
 --     * criteria absent from @CriteriaJson mean "no filter"
 --     * final SELECT uses TOP (@MaxRows + 1) so the API can detect truncation

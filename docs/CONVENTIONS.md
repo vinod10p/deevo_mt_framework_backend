@@ -633,7 +633,7 @@ DEEVO_ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:3001","http://l
 
 For **`deevo_mt_framework_backend`**, table DDL is **owned and applied in SQL Server Management Studio**, not via Alembic in this repo.
 
-- Create/alter tables in schemas `auth`, `tenant`, `audit` using **`deevo_ddl`** (or equivalent DDL login).
+- Create/alter tables in schemas `auth`, `tenant`, `audit`, `rpt` using **`deevo_ddl`** (or equivalent DDL login). Canonical DDL: [database_schema_v1.sql](database_schema_v1.sql) for `auth`/`tenant`/`audit`, [rpt_schema_v5.sql](rpt_schema_v5.sql) for `rpt`.
 - SQLAlchemy models in `mtf/**/models` must match the live database — update models when SSMS schema changes.
 - Keep a change script in source control (e.g. `docs/sql/` or your team’s script folder) if you want history; the app does not run DDL.
 - Product schemas (`crm`, etc.) are managed by their own backends.

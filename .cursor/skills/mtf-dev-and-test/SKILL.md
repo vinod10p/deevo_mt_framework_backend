@@ -78,7 +78,7 @@ Skip integration without env flag on each run:
 export DEEVO_SKIP_DB_TESTS=1   # or set in .env
 ```
 
-Pytest marker defined in [pyproject.toml](../../pyproject.toml):
+Pytest marker defined in [pyproject.toml](../../../pyproject.toml):
 
 ```toml
 integration: requires live SQL Server and credentials in .env
@@ -120,5 +120,5 @@ curl -X POST http://localhost:8000/api/auth/login \
 
 ## Docs pointer
 
-- Rules: [docs/CONVENTIONS.md](../../docs/CONVENTIONS.md)
-- Scope / current step: [docs/PROJECT_CONTEXT.md](../../docs/PROJECT_CONTEXT.md)
+- Rules: [docs/CONVENTIONS.md](../../../docs/CONVENTIONS.md)
+- Scope / current step: [docs/PROJECT_CONTEXT.md](../../../docs/PROJECT_CONTEXT.md)
