@@ -11,7 +11,7 @@ Multi-tenant framework backend for Deevo.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.13+
 - [uv](https://docs.astral.sh/uv/)
 - ODBC Driver 17 or 18 for SQL Server (when using `DB_TYPE=mssql` / pyodbc)
 

@@ -18,7 +18,7 @@ uv sync --group dev
 cp .env.example .env   # fill SQL Server + JWT values
 ```
 
-Python 3.11+. ODBC Driver 17 or 18 for SQL Server when using pyodbc.
+Python 3.13+. ODBC Driver 17 or 18 for SQL Server when using pyodbc.
 
 ## Run the server
 
