@@ -7,6 +7,7 @@ so one **`.env`** can work across CRM and MTF projects.
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import Literal, Self
 from urllib.parse import quote_plus
 
@@ -14,6 +15,13 @@ from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_JWT_SECRETS = frozenset({"changeme", "change-me", "your_secret_key_here", ""})
+
+
+def _package_version() -> str:
+    try:
+        return version("deevo-mt-framework-backend")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 class Settings(BaseSettings):
@@ -30,7 +38,7 @@ class Settings(BaseSettings):
         default="Deevo MT Framework",
         validation_alias=AliasChoices("DEEVO_APP_NAME", "APP_NAME"),
     )
-    app_version: str = Field(default="0.1.0")
+    app_version: str = Field(default_factory=_package_version)
     debug: bool = Field(
         default=False,
         validation_alias=AliasChoices("DEEVO_DEBUG", "DEBUG"),
