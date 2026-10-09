@@ -93,17 +93,24 @@ def test_report_routes_require_bearer() -> None:
 
 def test_list_reports_tenant_scope_uses_jwt_tenant() -> None:
     svc = _with_user(tenant_user())
-    r = TestClient(app).get("/api/reports", params={"skip": 5, "limit": 20})
+    r = TestClient(app).get("/api/reports")
     assert r.status_code == 200
     assert r.json()[0]["report_key"] == "tenant_account_list"
-    svc.list_reports.assert_called_once_with(TEST_TENANT_ID, skip=5, limit=20)
+    svc.list_reports.assert_called_once_with(TEST_TENANT_ID)
+
+
+def test_list_reports_ignores_paging_params() -> None:
+    svc = _with_user(tenant_user())
+    r = TestClient(app).get("/api/reports", params={"skip": 5, "limit": 500})
+    assert r.status_code == 200
+    svc.list_reports.assert_called_once_with(TEST_TENANT_ID)
 
 
 def test_list_reports_portal_scope_allowed() -> None:
     svc = _with_user(portal_user())
     r = TestClient(app).get("/api/reports")
     assert r.status_code == 200
-    svc.list_reports.assert_called_once_with(TEST_TENANT_ID, skip=0, limit=100)
+    svc.list_reports.assert_called_once_with(TEST_TENANT_ID)
 
 
 def test_report_routes_forbidden_for_system_scope() -> None:

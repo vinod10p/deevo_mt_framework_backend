@@ -30,7 +30,7 @@ from mtf.rpt.services import (
     ReportRunService,
     ReportSavedViewService,
 )
-from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination
+from mtf.shared.deps import CurrentUser, get_db
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -53,11 +53,10 @@ def get_report_saved_view_service(db: Session = Depends(get_db)) -> ReportSavedV
 
 @router.get("", response_model=list[ReportSummaryRead])
 def list_reports(
-    pagination: PaginationParams = Depends(get_pagination),
     tenant_id: str = Depends(get_report_tenant_id),
     service: ReportCatalogService = Depends(get_report_catalog_service),
 ) -> list[ReportSummaryRead]:
-    return service.list_reports(tenant_id, skip=pagination.skip, limit=pagination.limit)
+    return service.list_reports(tenant_id)
 
 
 @router.get("/{report_key}", response_model=ReportDetailRead)

@@ -146,6 +146,7 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
 | [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
+| [../prompts/rpt/NEW_REPORT_PROMPT.md](../prompts/rpt/NEW_REPORT_PROMPT.md) | Adding a report — procs, metadata rows per table, worked example, checks |
 | [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
 | [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |
 | [AI_SKILLS.md](AI_SKILLS.md) | Cursor rules/skills rationale and reference |

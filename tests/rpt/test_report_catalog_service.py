@@ -107,7 +107,7 @@ def test_list_reports_scopes_to_tenant_and_hides_overridden_system_reports() -> 
     db = MagicMock()
     db.scalars.return_value.all.return_value = [minimal_report()]
 
-    result = ReportCatalogService(db).list_reports(TEST_TENANT_ID, skip=10, limit=25)
+    result = ReportCatalogService(db).list_reports(TEST_TENANT_ID)
 
     assert [r.report_key for r in result] == ["tenant_account_list"]
     stmt = db.scalars.call_args.args[0]
@@ -115,6 +115,9 @@ def test_list_reports_scopes_to_tenant_and_hides_overridden_system_reports() -> 
     params = _params(stmt)
     assert "EXISTS" in sql
     assert "ORDER BY" in sql
+    assert "OFFSET" not in sql
+    assert "FETCH" not in sql
+    assert "TOP" not in sql
     assert TEST_TENANT_ID in params.values()
     assert OTHER_TENANT_ID not in params.values()
     assert "system" in params.values()

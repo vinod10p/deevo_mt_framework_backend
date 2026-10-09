@@ -132,12 +132,8 @@ illustrative.
 
 ### 4.1 `GET {API_BASE}/reports` — catalog
 
-Lists reports this tenant can see (system reports + this tenant's own reports).
-
-| Query | Type | Default | Notes |
-|---|---|---|---|
-| `skip` | int ≥ 0 | 0 | offset |
-| `limit` | int 1–200 | 100 | send `200`; the list is small |
+Lists **all** reports this tenant can see (system reports + this tenant's own reports), ordered by
+`display_name`. No query parameters and no paging — the response is always the full list.
 
 ```ts
 type ReportScopeType = 'system' | 'tenant'
@@ -162,8 +158,7 @@ interface ReportSummaryRead {
 ```
 
 UI: table with Name, Scope badge (`Custom` for `tenant`), Description; client-side search over
-`display_name` + `report_key`; row click → runner route. Paging may be removed from this endpoint —
-treat the response as the full list and don't build paging UI.
+`display_name` + `report_key`; row click → runner route. Don't build paging UI.
 
 ### 4.2 `GET {API_BASE}/reports/{report_key}` — metadata
 
@@ -717,7 +712,7 @@ Adapt names and folders to the app; the responsibilities matter, not the file na
 
 **Not in the API** (remove if an older implementation has them): a `lookup_mode` field;
 comma-separated `values`; `400` for bad criteria (it is `422`); "endpoint not available" fallbacks
-for run, lookups or saved views; server-side paging of rows.
+for run, lookups or saved views; server-side paging of rows; `skip`/`limit` on the catalog.
 
 ---
 

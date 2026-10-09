@@ -41,14 +41,8 @@ class ReportCatalogService:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def list_reports(
-        self,
-        tenant_id: str,
-        *,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> list[ReportSummaryRead]:
-        """System reports plus the tenant's own.
+    def list_reports(self, tenant_id: str) -> list[ReportSummaryRead]:
+        """All system reports plus the tenant's own — not paginated.
 
         A tenant report hides a system report with the same ``report_key``.
         """
@@ -75,8 +69,6 @@ class ReportCatalogService:
                 ),
             )
             .order_by(ReportDefinition.display_name, ReportDefinition.report_key)
-            .offset(skip)
-            .limit(limit)
         )
         return [ReportSummaryRead.model_validate(r) for r in self._db.scalars(stmt).all()]
 

@@ -7,6 +7,7 @@ Design background and the *why* behind the schema:
 [docs/REPORTING_FRAMEWORK_CONTEXT.md](../../docs/REPORTING_FRAMEWORK_CONTEXT.md).
 Frontend contract for these endpoints (copied into each consuming app):
 [REPORT_FRONTEND_PROMPT.md](REPORT_FRONTEND_PROMPT.md).
+Adding a report (procs + metadata rows, no code): [NEW_REPORT_PROMPT.md](NEW_REPORT_PROMPT.md).
 
 Follow this repo's conventions ([docs/CONVENTIONS.md](../../docs/CONVENTIONS.md),
 [docs/LAYERING.md](../../docs/LAYERING.md)): FastAPI, Pydantic v2, SQLAlchemy 2.0 (sync) +
@@ -216,11 +217,11 @@ Product-specific report procs (e.g. DeevoFlow CRM reports) live in that product'
 
 ## Endpoints
 
-### 1. `GET /reports?skip=0&limit=100` — report catalog
+### 1. `GET /reports` — report catalog
 **Status: built** (`mtf/rpt/api/report.py`).
-Reports visible to the caller's tenant (system-wide + their own tenant-scoped reports),
-paginated. This is about how many *report definitions* exist, unrelated to the
-"no pagination on report data" rule.
+All reports visible to the caller's tenant (system-wide + their own tenant-scoped reports),
+ordered by `display_name`, `report_key`. **Not paginated** — no `skip`/`limit`, no cap; the
+number of report definitions is small. Unknown query params are ignored.
 
 ### 2. `GET /reports/{report_key}` — report metadata
 **Status: built.**
