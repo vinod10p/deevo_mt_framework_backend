@@ -13,9 +13,9 @@ Read [docs/CONVENTIONS.md](../../../docs/CONVENTIONS.md) (API, Layering, Errors)
 
 ## Scope check
 
-In scope: `mtf/auth`, `mtf/tenant`, `mtf/audit`, `mtf/shared`.
+In scope: `mtf/auth`, `mtf/tenant`, `mtf/audit`, `mtf/rpt`, `mtf/txn`, `mtf/shared`.
 
-Out of scope: `crm`, `email`, `txn`, `scout`, `flow` — do not add here.
+Out of scope: product entity CRUD (`crm` Lead, etc.), `email`, `scout`, `flow`. `mtf/txn` is generic screen metadata only.
 
 ## Checklist
 

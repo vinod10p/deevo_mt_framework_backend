@@ -57,6 +57,9 @@ Update statuses as work progresses.
 | 14 | `rpt/` Phase 1 — report catalog read service (`GET /api/reports`, `GET /api/reports/{report_key}`) | ✅ Done |
 | 15 | `rpt/` Phase 2 — execution engine: lookups + `/run` (parameterized proc call, tenant session context) | ✅ Done |
 | 16 | `rpt/` Phase 3 — saved view CRUD (`report_saved_view`) + User → Tenant → System default | ⬜ Pending |
+| 17 | `txn/` models — screen, section, field, lookup, permission + V2 `rpt` metadata | ✅ Done |
+| 18 | `txn/` PermissionService (screens only) + `require_screen_permission()` | ✅ Done |
+| 19 | `txn/` Screen metadata API `GET /api/screens/{screen_key}` | ✅ Done |
 
 ---
 
@@ -70,15 +73,15 @@ Update statuses as work progresses.
 | `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
 | `mtf/tenant` | `tenant` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
-| `mtf/rpt` | `rpt` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
+| `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_permission`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
+| `mtf/txn` | `txn` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` — generic transaction-screen metadata only (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)) |
 
 ### Out of Scope
 
-Product domains are **not** implemented here — `crm`, `email`, `txn`, `scout`, `flow`.
-These belong to `deevo_crm_backend` and other product backends.
+Product domains are **not** implemented here — `crm`, `email`, `scout`, `flow`, and entity CRUD (Lead, Customer, …). Those belong to product backends such as `deevoflow_backend`. Products seed `txn.screen` rows and implement entity APIs; they must not add generic metadata services here.
 
 Products may share the same SQL Server instance but must never write to
-`auth.*`, `tenant.*`, `audit.*`, or `rpt.*` tables directly (only via this API).
+`auth.*`, `tenant.*`, `audit.*`, `rpt.*`, or `txn.*` tables directly (only via this API, or documented seed scripts).
 
 ---
 
@@ -92,6 +95,7 @@ Products may share the same SQL Server instance but must never write to
 | `/api/account` | `mtf.tenant` (portal) | account self-service — users menu (`tenant_account` scope) |
 | `/api/audit` | `mtf.audit` | read/create audit log (append-only) |
 | `/api/reports` | `mtf.rpt` | report catalog metadata (`tenant` + `tenant_account` scope) |
+| `/api/screens` | `mtf.txn` | generic screen metadata (`GET /{screen_key}`; JWT tenant required) |
 
 Public (no Bearer token): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refresh`.
 
@@ -142,11 +146,14 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [LAYERING.md](LAYERING.md) | api, model, schema, service responsibilities |
 | [database_schema_v1.sql](database_schema_v1.sql) | Canonical MTF table DDL (auth, tenant, audit) |
 | [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) | Generic reporting framework design (`rpt`) |
-| [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL |
+| [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL (V2 additions are in txn_schema_v2.sql) |
+| [txn_schema_v2.sql](txn_schema_v2.sql) | Canonical `txn` table DDL + report permission/action tables |
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
 | [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
 | [../prompts/rpt/NEW_REPORT_PROMPT.md](../prompts/rpt/NEW_REPORT_PROMPT.md) | Adding a report — procs, metadata rows per table, worked example, checks |
+| [../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md](../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md) | DeevoFlow product prompt — mount `mtf.txn`, seed Lead screen, lookups, envelope CRUD |
+| [../prompts/txn/TRANSACTION_FRONTEND_PROMPT.md](../prompts/txn/TRANSACTION_FRONTEND_PROMPT.md) | Transaction screen React contract — copied into each consuming frontend |
 | [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
 | [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |
 | [AI_SKILLS.md](AI_SKILLS.md) | Cursor rules/skills rationale and reference |

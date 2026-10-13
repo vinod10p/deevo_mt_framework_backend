@@ -43,6 +43,12 @@ class ReportDefinition(Base):
         nullable=False,
         server_default=text("20000"),
     )
+    #: CK_report_definition_permission_mode: open | restricted
+    permission_mode: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'open'"),
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

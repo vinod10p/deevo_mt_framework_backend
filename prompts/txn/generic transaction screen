@@ -1,0 +1,64 @@
+Yes. The two documents are enough as architecture/reference material, but I would not give Cursor only the two PDFs and say “build this.” You’ll get much better results if you use the documents as permanent context and then give Cursor small implementation prompts, one step at a time.
+
+The two documents cover the important design decisions:
+
+* Architecture document — what the generic transaction framework is, metadata tables, permissions, lookups, report integration, and boundaries.
+* Backend API Design — how FastAPI should implement permissions, metadata, Lead CRUD, lookups, concurrency, tenant isolation, errors, and report actions.
+
+What is still useful is a Cursor implementation prompt that tells Cursor how to work with your existing codebase. That prompt should explicitly say: do not redesign V1, inspect existing patterns first, follow current project structure/naming/auth/database conventions, implement only the requested step, and ask before making architectural changes.
+
+I recommend working through Cursor in this order:
+
+1. Codebase assessment only — give Cursor both documents and ask it to inspect the existing FastAPI project. No coding. Have it identify current auth/tenant context, SQLAlchemy session handling, router/service/repository patterns, exception handling, audit handling, report V1 structure, and where the new V2 code should fit.
+2. Database model synchronization — add/update SQLAlchemy models for the new txn.* and rpt.* metadata tables and add txn.lookup.display_field_key. Do not build APIs yet.
+3. PermissionService — implement and test the exact open/restricted/inactive-row rules from the final document, plus reusable require_screen_permission() dependencies.
+4. Screen Metadata API — implement only:
+    GET /api/v1/screens/{screen_key}
+    Include tenant overrides, permissions, sections, fields, lookup metadata, required-field hiding protection, and tests.
+5. First lookup API — preferably whichever lookup the Lead screen actually needs.
+6. Lead GET, then separately Lead POST, PATCH, and DELETE. I would not ask Cursor to implement all four at once because tenant validation, mass assignment, audit, and row-version handling deserve individual review.
+7. Only after the backend is tested should we move to the React generic transaction screen.
+   Frontend contract: [TRANSACTION_FRONTEND_PROMPT.md](TRANSACTION_FRONTEND_PROMPT.md).
+
+DeevoFlow product implementation (Lead seed, lookups, envelope CRUD) is a **separate**
+Cursor workspace. Prompt: [DEEVOFLOW_LEAD_SCREEN.md](DEEVOFLOW_LEAD_SCREEN.md).
+
+A useful master instruction to put into Cursor at the beginning would be:
+
+Use the attached Deevolight Generic Transaction Screens architecture and Backend API Design FINAL documents as the governing specification for this work. The existing Generic Report Writer V1 is already working and must not be redesigned or broken.
+
+Before implementing any task, inspect the existing codebase and reuse its established FastAPI, SQLAlchemy, authentication, tenant-context, database-session, exception-handling, audit, naming, and project-structure patterns.
+
+Do not invent a new architecture when an existing project pattern can be reused. Do not implement generic dynamic-SQL CRUD. Transaction CRUD remains entity-specific.
+
+Implement only the task I explicitly request. Do not proceed automatically to later phases.
+
+Before changing code, tell me:
+
+1. which existing files/components are relevant,
+2. which files you propose to create or modify,
+3. the implementation approach,
+4. any conflict you find between the specification and the existing code.
+
+After implementation, provide:
+
+1. files changed,
+2. APIs/components implemented,
+3. tests added and results,
+4. assumptions made,
+5. anything still pending.
+
+Security requirements in the Backend API Design FINAL document—including tenant isolation, cross-tenant reference validation, permission enforcement, mass-assignment protection, and row-version concurrency—are mandatory and must not be simplified.
+
+Then your first actual Cursor task should be something like:
+
+Read both architecture documents and inspect the current Deevolight backend codebase. Do not make any code changes yet.
+
+Map the existing backend architecture relevant to Generic Transaction Screens, including authentication/user context, tenant context, SQLAlchemy session management, models, routers, services/repositories, audit logging, exception/error handling, Generic Report Writer V1 endpoints, and existing permission handling.
+
+Compare the existing implementation against the Backend API Design FINAL document. Tell me exactly where the new V2 components should fit and identify any conflicts or existing functionality we should reuse.
+
+End with a proposed file-by-file implementation plan for Step 1: PermissionService only. Do not implement it yet.
+
+That assessment prompt is important. The documents tell Cursor what we want; this first prompt makes Cursor understand what you already have before it starts generating code.
+

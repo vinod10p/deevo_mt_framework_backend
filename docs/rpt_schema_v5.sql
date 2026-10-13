@@ -23,6 +23,8 @@
 --
 -- Requires SQL Server 2022+ / compatibility level 160+ (2-arg ISJSON on report_saved_view).
 -- Run in SSMS as deevo_ddl. Grants and the sample report are in rpt_seed_sample_report.sql.
+-- Additive V2 (permission_mode, report_permission, report_action, report_action_param):
+--   docs/txn_schema_v2.sql
 -- ============================================================================
 
 IF SCHEMA_ID(N'rpt') IS NULL

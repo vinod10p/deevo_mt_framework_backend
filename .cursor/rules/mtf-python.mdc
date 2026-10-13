@@ -18,7 +18,7 @@ Before changing code under `mtf/`, read:
 - IDs: ULID `VARCHAR(26)` generated in services, not in API layer
 - Soft delete: filter `is_deleted = False` on list/get; use `deleted_by` on delete
 - Errors: `mtf.shared.exceptions` helpers → `{"code": "DOMAIN_ENTITY_REASON", "message": "..."}`
-- SQL schemas in this repo: `auth`, `tenant`, `audit`, `rpt` only — no `crm`, `email`, `txn`, etc.
+- SQL schemas in this repo: `auth`, `tenant`, `audit`, `rpt`, `txn` — no `crm`, `email`, etc. `txn` is screen metadata only, not entity CRUD.
 - DB: sync SQLAlchemy + pyodbc; models match live SSMS DDL (no Alembic in v1)
 - Login table: `auth.app_user` — not `auth.user`
 
@@ -26,7 +26,7 @@ Before changing code under `mtf/`, read:
 
 | Module | Structure |
 |--------|-----------|
-| `auth`, `tenant`, `rpt` | Split: `api/`, `models/`, `schemas/`, `services/` per entity |
+| `auth`, `tenant`, `rpt`, `txn` | Split: `api/`, `models/`, `schemas/`, `services/` per entity |
 | `audit` | Flat: `models.py`, `schemas.py`, `service.py` |
 | `shared` | config, database, security, deps, exceptions |
 

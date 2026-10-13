@@ -91,7 +91,9 @@ deevo_mt_framework_backend/
 │   ├── shared/           # Shared config, database, security
 │   ├── auth/             # Authentication & users
 │   ├── tenant/           # Tenant management
-│   └── audit/            # Audit logging
+│   ├── audit/            # Audit logging
+│   ├── rpt/              # Generic report writer
+│   └── txn/              # Generic transaction-screen metadata
 ├── tests/
 ├── docs/
 │   ├── CONVENTIONS.md       # Rules (stable)

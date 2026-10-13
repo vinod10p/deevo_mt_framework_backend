@@ -9,6 +9,7 @@ from mtf.rpt.api import router as rpt_router
 from mtf.shared.config import get_settings
 from mtf.tenant.api import router as tenant_router
 from mtf.tenant.api.tenant_account_portal import router as tenant_account_portal_router
+from mtf.txn.api import router as txn_router
 
 settings = get_settings()
 
@@ -38,6 +39,7 @@ app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(tenant_account_portal_router, prefix="/api/account")
 app.include_router(audit_router, prefix="/api/audit")
 app.include_router(rpt_router, prefix="/api")
+app.include_router(txn_router, prefix="/api")
 
 from mtf.tenant.api.tenant import mailbox_oauth_callback
 app.get("/api/v1/mailboxes/callback")(mailbox_oauth_callback)

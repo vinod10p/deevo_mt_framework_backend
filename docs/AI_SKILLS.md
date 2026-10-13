@@ -63,7 +63,7 @@ These are recurring, error-prone workflows where skills help:
 
 3. **Integration testing** — `DEEVO_SKIP_DB_TESTS=1` for unit-only; `pytest -m integration` for SQL Server; cleanup patterns in tenant/auth integration tests.
 
-4. **MTF vs CRM boundary** — Agent should not add `crm`/`email`/`txn` schemas here; skills enforce “out of scope” checks from [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
+4. **MTF vs product boundary** — Agent should not add `crm`/`email` entity CRUD here; `txn` is framework-owned screen metadata. Skills enforce scope checks from [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 
 5. **Local dev ops** — Port 8000 conflicts, `uv sync --group dev`, suspended processes (Ctrl+Z vs Ctrl+C)—covered by `mtf-dev-and-test` skill.
 

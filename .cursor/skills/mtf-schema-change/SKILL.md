@@ -36,8 +36,8 @@ Copy and track progress:
 
 - Apply DDL in **SQL Server Management Studio** logged in as **`deevo_ddl`**.
 - **Never** run DDL from the running app (`deevo_app` is read/write only).
-- Limit changes to MTF schemas: `auth`, `tenant`, `audit`, `rpt`.
-- Product schemas (`crm`, `email`, `txn`, `scout`, `flow`) belong to other repos.
+- Limit changes to MTF schemas: `auth`, `tenant`, `audit`, `rpt`, `txn`.
+- Product schemas (`crm`, `email`, `scout`, `flow`) belong to other repos. `txn` is framework-owned metadata (screens, lookups, permissions) — not entity CRUD.
 
 Optional: save the script under `docs/sql/` for history (team convention).
 
@@ -49,10 +49,12 @@ For breaking or versioned releases, add `docs/database_schema_v2.sql` instead of
 
 `rpt` tables are not in `database_schema_v1.sql` — their DDL is
 [docs/rpt_schema_v5.sql](../../../docs/rpt_schema_v5.sql); update that file instead.
+`txn` tables (and V2 `rpt.report_permission` / `report_action` / `report_action_param` /
+`permission_mode`) are in [docs/txn_schema_v2.sql](../../../docs/txn_schema_v2.sql).
 
 ## Step 3 — SQLAlchemy models
 
-- `auth` / `tenant` / `rpt`: one file per entity under `mtf/<domain>/models/`
+- `auth` / `tenant` / `rpt` / `txn`: one file per entity under `mtf/<domain>/models/`
 - `audit`: flat `mtf/audit/models.py`
 - Match column names, types, nullability, and SQL schema (`__table_args__ = {"schema": "auth"}` etc.)
 - Include `row_version`, `is_deleted`, `deleted_by`, audit columns where the table has them
@@ -75,7 +77,7 @@ For breaking or versioned releases, add `docs/database_schema_v2.sql` instead of
 - Thin routers only — delegate to services
 - Register new routers in `mtf/<domain>/api/__init__.py`
 - Mount prefix already set in [main.py](../../../main.py): `/api/auth`, `/api/tenant`, `/api/audit`,
-  and `/api` for `rpt` (its router carries `/reports`)
+  and `/api` for `rpt` (`/reports`) and `txn` (`/screens`)
 
 ## Step 7 — Tests
 

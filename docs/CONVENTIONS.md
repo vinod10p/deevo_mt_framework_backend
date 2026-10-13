@@ -14,7 +14,7 @@ For **project identity, current build step, and scope**, see [PROJECT_CONTEXT.md
 |-------|------|
 | **IDs** | ULID as `VARCHAR(26)`; generate in services |
 | **Table names** | Singular (`tenant`, `app_user`); login identity is **`auth.app_user`**, not `auth.user` |
-| **SQL schemas (this repo)** | `auth`, `tenant`, `audit`, `rpt` only |
+| **SQL schemas (this repo)** | `auth`, `tenant`, `audit`, `rpt`, `txn` |
 | **Soft delete** | `is_deleted` + `deleted_by`; never hard-delete mutable rows |
 | **Queries** | Filter `is_deleted = False` unless intentionally listing deleted rows |
 | **Layering** | `api/` → `services/` → models/DB; `audit` flat; `auth` / `tenant` / `rpt` split |
@@ -39,7 +39,7 @@ Products (e.g. `deevo_crm_backend`) run as separate services and share the same 
 
 - **Database:** Microsoft **SQL Server 2022 or later** (2025 Standard Edition in production)
 - **DB access (v1):** Synchronous SQLAlchemy `Session` + **pyodbc** only — no async engine in v1
-- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant`, `rpt` (framework-owned). Product schemas (`crm`, `email`, `txn`, `scout`, `flow`) are owned by their respective product backends.
+- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant`, `rpt`, `txn` (framework-owned). Product schemas (`crm`, `email`, `scout`, `flow`) are owned by their respective product backends.
 - **Python ORM:** SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`, `mapped_column`). Validation/serialisation: Pydantic v2 (`BaseModel`, `ConfigDict`).
 - **Package manager:** `uv`. Use `uv add <package>` to add dependencies.
 
@@ -190,8 +190,9 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 | `auth` | `deevo_mt_framework_backend` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
 | `tenant` | `deevo_mt_framework_backend` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `audit` | `deevo_mt_framework_backend` | `audit_log` |
-| `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql)) |
-| `crm` | `deevo_crm_backend` | leads, contacts, accounts, deals, activities |
+| `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view`, `report_permission`, `report_action`, `report_action_param` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql), additive V2 in [txn_schema_v2.sql](txn_schema_v2.sql)) |
+| `txn` | `deevo_mt_framework_backend` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)). Metadata only — entity CRUD stays in product backends. |
+| `crm` | `deevo_crm_backend` / `deevoflow_backend` | leads, contacts, accounts, deals, activities |
 
 ### Database Users
 
@@ -218,6 +219,7 @@ app.include_router(auth_router,   prefix="/api/auth")
 app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(audit_router,  prefix="/api/audit")
 app.include_router(rpt_router,    prefix="/api")   # entity routers carry /reports
+app.include_router(txn_router,    prefix="/api")   # entity routers carry /screens
 ```
 
 ---
@@ -236,7 +238,7 @@ Client → mtf/<domain>/api/<entity>.py → mtf/<domain>/services/<entity>.py �
 ### Layout Rules
 
 - `audit` uses **flat layout**: `models.py`, `schemas.py`, `service.py` at domain root. HTTP under `api/`.
-- All other domains (`auth`, `tenant`, `rpt`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
+- All other domains (`auth`, `tenant`, `rpt`, `txn`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
 - Never keep both `models.py` and `models/` under the same domain — Python resolves one `models` name only.
 
 ---
@@ -633,7 +635,7 @@ DEEVO_ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:3001","http://l
 
 For **`deevo_mt_framework_backend`**, table DDL is **owned and applied in SQL Server Management Studio**, not via Alembic in this repo.
 
-- Create/alter tables in schemas `auth`, `tenant`, `audit`, `rpt` using **`deevo_ddl`** (or equivalent DDL login). Canonical DDL: [database_schema_v1.sql](database_schema_v1.sql) for `auth`/`tenant`/`audit`, [rpt_schema_v5.sql](rpt_schema_v5.sql) for `rpt`.
+- Create/alter tables in schemas `auth`, `tenant`, `audit`, `rpt`, `txn` using **`deevo_ddl`** (or equivalent DDL login). Canonical DDL: [database_schema_v1.sql](database_schema_v1.sql) for `auth`/`tenant`/`audit`, [rpt_schema_v5.sql](rpt_schema_v5.sql) for `rpt`, [txn_schema_v2.sql](txn_schema_v2.sql) for `txn` (and V2 report permission/action tables).
 - SQLAlchemy models in `mtf/**/models` must match the live database — update models when SSMS schema changes.
 - Keep a change script in source control (e.g. `docs/sql/` or your team’s script folder) if you want history; the app does not run DDL.
 - Product schemas (`crm`, etc.) are managed by their own backends.
