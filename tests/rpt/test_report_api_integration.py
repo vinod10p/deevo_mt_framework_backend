@@ -67,6 +67,7 @@ def test_get_seeded_report_metadata() -> None:
     assert criteria["created_date"]["has_lookup"] is False
     assert "proc_name" not in r.text
     assert "lookup_proc" not in r.text
+    assert body["actions"] == []
 
 
 def test_system_report_visible_to_any_tenant_and_portal() -> None:

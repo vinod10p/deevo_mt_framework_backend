@@ -7,7 +7,14 @@ from datetime import datetime
 
 import pytest
 
-from mtf.rpt.models import ReportColumn, ReportCriteria, ReportDefinition, ReportSavedView
+from mtf.rpt.models import (
+    ReportAction,
+    ReportActionParam,
+    ReportColumn,
+    ReportCriteria,
+    ReportDefinition,
+    ReportSavedView,
+)
 from mtf.shared.deps import CurrentUser
 
 
@@ -29,6 +36,10 @@ TEST_ACCOUNT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE1"
 TEST_USER_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE3"
 SYSTEM_REPORT_ID = "01JRPT0DF00000000000000001"
 TENANT_REPORT_ID = "01JRPT0DF00000000000000002"
+TARGET_REPORT_ID = "01JRPT0DF00000000000000003"
+SAMPLE_ACTION_ID = "01JRPT0AC00000000000000001"
+SAMPLE_ACTION_PARAM_ID = "01JRPT0AP00000000000000001"
+SAMPLE_SCREEN_ID = "01JTXNSCR00000000000000001"
 
 
 def tenant_user(tenant_id: str | None = TEST_TENANT_ID) -> CurrentUser:
@@ -126,6 +137,38 @@ def minimal_saved_view(**kwargs: object) -> ReportSavedView:
     }
     base.update(kwargs)
     return ReportSavedView(**base)  # type: ignore[arg-type]
+
+
+def minimal_action(**kwargs: object) -> ReportAction:
+    base: dict[str, object] = {
+        "id": SAMPLE_ACTION_ID,
+        "report_id": SYSTEM_REPORT_ID,
+        "action_key": "open_sample",
+        "display_name": "Open Sample",
+        "action_type": "screen",
+        "display_location": "row",
+        "trigger_column_key": None,
+        "target_report_id": None,
+        "target_screen_id": SAMPLE_SCREEN_ID,
+        "screen_mode": "view",
+        "display_order": 10,
+        **_audit_fields(),
+    }
+    base.update(kwargs)
+    return ReportAction(**base)  # type: ignore[arg-type]
+
+
+def minimal_action_param(**kwargs: object) -> ReportActionParam:
+    base: dict[str, object] = {
+        "id": SAMPLE_ACTION_PARAM_ID,
+        "action_id": SAMPLE_ACTION_ID,
+        "source_type": "column",
+        "source_key": "record_id",
+        "target_key": "id",
+        **_audit_fields(),
+    }
+    base.update(kwargs)
+    return ReportActionParam(**base)  # type: ignore[arg-type]
 
 
 def minimal_criteria(**kwargs: object) -> ReportCriteria:

@@ -133,6 +133,20 @@ def test_service_passes_inactive_permission_row_to_resolver() -> None:
     assert perms.any_granted() is False
 
 
+def test_resolve_for_screen_uses_live_permission_row() -> None:
+    db = MagicMock()
+    result = MagicMock()
+    result.first.return_value = minimal_permission(can_add=False)
+    db.scalars.return_value = result
+
+    perms = ScreenPermissionService(db).resolve_for_screen(
+        TEST_TENANT_ID, TEST_USER_ID, minimal_screen()
+    )
+
+    assert perms.can_view is True
+    assert perms.can_add is False
+
+
 def test_deleted_permission_row_is_not_queried_as_live() -> None:
     """Service SQL omits deleted rows, so they resolve like 'no row'."""
     screen = minimal_screen(permission_mode="restricted")

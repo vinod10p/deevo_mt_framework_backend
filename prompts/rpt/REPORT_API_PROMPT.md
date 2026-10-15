@@ -225,9 +225,69 @@ number of report definitions is small. Unknown query params are ignored.
 
 ### 2. `GET /reports/{report_key}` — report metadata
 **Status: built.**
-The resolved `report_definition` plus active `report_column[]` and `report_criteria[]`,
-ordered by `display_order`. Static metadata only — no saved-view resolution (see #6).
-Never exposes `proc_name`/`lookup_proc`; criteria carry `has_lookup` instead.
+The resolved `report_definition` plus active `report_column[]`, `report_criteria[]`,
+and `actions[]`, each ordered by `display_order`. Static metadata only — no saved-view
+resolution (see #6). Never exposes `proc_name`/`lookup_proc`; criteria carry `has_lookup`
+instead. Action rows never expose internal ids (`id`, `target_screen_id`, `target_report_id`).
+
+`actions[]` comes from live `rpt.report_action` (+ live `report_action_param`). A **screen**
+action is omitted unless the caller may use that `screen_mode` on the target
+(`add` → `can_add`, `view` → `can_view` via `ScreenPermissionService`). A **report** action
+is omitted unless the tenant can see a report with that `report_key`. Missing or inactive
+targets are omitted; they do not 404 the catalog response.
+
+```json
+{
+  "action_key": "open_sample",
+  "display_name": "Open Sample",
+  "action_type": "screen",
+  "display_location": "row",
+  "trigger_column_key": null,
+  "display_order": 10,
+  "screen_key": "sample_screen",
+  "screen_mode": "view",
+  "report_key": null,
+  "params": [
+    { "source_type": "column", "source_key": "record_id", "target_key": "id" }
+  ]
+}
+```
+
+### 2b. `POST /reports/{report_key}/actions/{action_key}/resolve` — navigation
+**Status: built** (`ReportActionService`, `mtf/rpt/services/report_action.py`).
+The client sends the current grid row and/or criteria. The server maps only declared
+`report_action_param` rows and returns trusted navigation. Extra client keys are ignored.
+
+```json
+{ "row": { "record_id": "01J…" }, "criteria": {} }
+```
+
+Toolbar Add may send `{}`. `row` is required for any `source_type=column` param;
+`criteria` for `source_type=criteria`. Missing/empty declared sources →
+`422 REPORT_ACTION_INVALID` with `detail.fields` keyed by `source_key`.
+
+Screen target (after `ScreenPermissionService` allows `add` / `view`):
+
+```json
+{ "target_type": "screen", "screen_key": "sample_screen", "mode": "view",
+  "params": { "id": "01J…" } }
+```
+
+`mode` is only `add` | `view`. Edit is decided later by the screen envelope.
+
+Report target (after the tenant can see that `report_key`); mapped values are
+validated with `validate_report_criteria()` against the **visible** target report:
+
+```json
+{ "target_type": "report", "report_key": "account_summary",
+  "criteria": { "account_code": "A100" } }
+```
+
+Errors: `404 REPORT_NOT_FOUND` (source or invisible target report),
+`404 REPORT_ACTION_NOT_FOUND` (unknown/inactive action or broken screen target),
+`403 SCREEN_FORBIDDEN` (target screen mode not allowed),
+`422 REPORT_CRITERIA_INVALID` (mapped report-target values fail the V1 contract).
+Never exposes internal ids.
 
 ### 3. `GET /reports/{report_key}/lookups/{criteria_key}` — lookup options
 **Status: built** (`ReportLookupService`, `mtf/rpt/services/report_lookup.py`).

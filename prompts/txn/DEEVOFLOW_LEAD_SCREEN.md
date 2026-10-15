@@ -258,7 +258,8 @@ Reuse `like_pattern`; clamp page size; do not call these from LeadService as a s
 
 ### Later (not this prompt)
 
-- Report → Lead navigation (`rpt.report_action`).
+- Report → Lead navigation — product seed prompt:
+  [DEEVOFLOW_LEAD_REPORT_ACTIONS.md](DEEVOFLOW_LEAD_REPORT_ACTIONS.md).
 - React generic `TransactionScreen`.
 - Other entities (Account, …): new seed + entity envelope in **this** repo; reuse the data-source lookups; no MTF change if metadata API is enough.
 - Remove the old `/api/v1/crm/leads/{id}` GET/POST/PATCH/DELETE and the old React Leads page once the new screen is accepted.

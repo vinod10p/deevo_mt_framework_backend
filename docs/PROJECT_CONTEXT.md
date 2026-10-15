@@ -60,6 +60,8 @@ Update statuses as work progresses.
 | 17 | `txn/` models — screen, section, field, lookup, permission + V2 `rpt` metadata | ✅ Done |
 | 18 | `txn/` PermissionService (screens only) + `require_screen_permission()` | ✅ Done |
 | 19 | `txn/` Screen metadata API `GET /api/screens/{screen_key}` | ✅ Done |
+| 20 | `rpt/` embed `actions[]` on `GET /api/reports/{report_key}` | ✅ Done |
+| 21 | `rpt/` `POST /api/reports/{report_key}/actions/{action_key}/resolve` | ✅ Done |
 
 ---
 
@@ -153,6 +155,7 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
 | [../prompts/rpt/NEW_REPORT_PROMPT.md](../prompts/rpt/NEW_REPORT_PROMPT.md) | Adding a report — procs, metadata rows per table, worked example, checks |
 | [../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md](../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md) | DeevoFlow product prompt — mount `mtf.txn`, seed Lead screen, lookups, envelope CRUD |
+| [../prompts/txn/DEEVOFLOW_LEAD_REPORT_ACTIONS.md](../prompts/txn/DEEVOFLOW_LEAD_REPORT_ACTIONS.md) | DeevoFlow product prompt — seed Lead list report → Lead screen actions |
 | [../prompts/txn/TRANSACTION_FRONTEND_PROMPT.md](../prompts/txn/TRANSACTION_FRONTEND_PROMPT.md) | Transaction screen React contract — copied into each consuming frontend |
 | [../README.md](../README.md) | Setup, install, run commands, Cursor rules/skills |
 | [../.cursor/rules/mtf-python.mdc](../.cursor/rules/mtf-python.mdc) | Agent rule for `mtf/**/*.py` |

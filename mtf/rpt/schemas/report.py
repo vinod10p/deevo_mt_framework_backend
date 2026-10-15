@@ -15,6 +15,10 @@ ReportControlType = Literal[
     "text", "number", "date", "daterange", "dropdown", "multiselect", "bool"
 ]
 ReportAggregateType = Literal["sum", "avg", "count", "min", "max"]
+ReportActionType = Literal["report", "screen"]
+ReportActionLocation = Literal["toolbar", "row", "column"]
+ReportActionScreenMode = Literal["add", "view"]
+ReportActionParamSource = Literal["column", "criteria"]
 
 
 class ReportSummaryRead(BaseModel):
@@ -92,6 +96,54 @@ class ReportRunRead(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class ReportActionParamRead(BaseModel):
+    """Maps a source row column or current criterion into a resolve target key."""
+
+    source_type: ReportActionParamSource
+    source_key: str
+    target_key: str
+
+
+class ReportActionRead(BaseModel):
+    """Toolbar, row, or column action on a report. Internal ids are omitted."""
+
+    action_key: str
+    display_name: str
+    action_type: ReportActionType
+    display_location: ReportActionLocation
+    trigger_column_key: str | None
+    display_order: int
+    screen_key: str | None = None
+    screen_mode: ReportActionScreenMode | None = None
+    report_key: str | None = None
+    params: list[ReportActionParamRead] = Field(default_factory=list)
+
+
+class ReportActionResolveRequest(BaseModel):
+    """``POST /api/reports/{report_key}/actions/{action_key}/resolve`` body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    row: dict[str, Any] = Field(default_factory=dict)
+    criteria: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScreenNavigationRead(BaseModel):
+    target_type: Literal["screen"] = "screen"
+    screen_key: str
+    mode: Literal["add", "view"]
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReportNavigationRead(BaseModel):
+    target_type: Literal["report"] = "report"
+    report_key: str
+    criteria: dict[str, Any] = Field(default_factory=dict)
+
+
+ReportActionResolveRead = ScreenNavigationRead | ReportNavigationRead
+
+
 class ReportDetailRead(BaseModel):
     """``GET /api/reports/{report_key}`` — definition plus grid columns and criteria panel."""
 
@@ -102,3 +154,4 @@ class ReportDetailRead(BaseModel):
     default_max_rows: int
     columns: list[ReportColumnRead]
     criteria: list[ReportCriteriaRead]
+    actions: list[ReportActionRead] = Field(default_factory=list)

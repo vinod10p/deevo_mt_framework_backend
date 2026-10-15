@@ -18,6 +18,7 @@ from mtf.shared.deps import CurrentUser, get_current_user
 from mtf.shared.exceptions import not_found
 from tests.rpt.conftest import (
     TEST_TENANT_ID,
+    TEST_USER_ID,
     portal_user,
     system_user,
     tenant_user,
@@ -136,7 +137,10 @@ def test_get_report_returns_metadata_without_proc_names() -> None:
     r = TestClient(app).get("/api/reports/tenant_account_list")
     assert r.status_code == 200
     body = r.json()
-    svc.get_report.assert_called_once_with(TEST_TENANT_ID, "tenant_account_list")
+    svc.get_report.assert_called_once_with(
+        TEST_TENANT_ID, "tenant_account_list", TEST_USER_ID
+    )
+    assert body["actions"] == []
     assert body["columns"][0]["column_name"] == "name"
     assert body["criteria"][0]["has_lookup"] is True
     assert "proc_name" not in r.text

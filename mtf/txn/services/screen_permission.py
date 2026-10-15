@@ -107,8 +107,17 @@ class ScreenPermissionService:
         screen_key: str,
     ) -> tuple[Screen, ScreenEffectivePermissions]:
         screen = self._live_screen(screen_key)
+        return screen, self.resolve_for_screen(tenant_id, user_id, screen)
+
+    def resolve_for_screen(
+        self,
+        tenant_id: str,
+        user_id: str,
+        screen: Screen,
+    ) -> ScreenEffectivePermissions:
+        """Resolve flags for an already-loaded live screen (no extra screen lookup)."""
         row = self._live_permission_row(tenant_id, user_id, screen.id)
-        return screen, resolve_screen_permissions(screen, row)
+        return resolve_screen_permissions(screen, row)
 
     def _live_screen(self, screen_key: str) -> Screen:
         stmt = select(Screen).where(

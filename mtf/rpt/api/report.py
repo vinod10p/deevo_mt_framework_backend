@@ -14,6 +14,8 @@ from mtf.rpt.api.deps import (
     get_report_user,
 )
 from mtf.rpt.schemas import (
+    ReportActionResolveRead,
+    ReportActionResolveRequest,
     ReportDetailRead,
     ReportLookupRead,
     ReportRunRead,
@@ -25,6 +27,7 @@ from mtf.rpt.schemas import (
 )
 from mtf.rpt.services import (
     AuditSource,
+    ReportActionService,
     ReportCatalogService,
     ReportLookupService,
     ReportRunService,
@@ -51,6 +54,10 @@ def get_report_saved_view_service(db: Session = Depends(get_db)) -> ReportSavedV
     return ReportSavedViewService(db)
 
 
+def get_report_action_service(db: Session = Depends(get_db)) -> ReportActionService:
+    return ReportActionService(db)
+
+
 @router.get("", response_model=list[ReportSummaryRead])
 def list_reports(
     tenant_id: str = Depends(get_report_tenant_id),
@@ -62,10 +69,10 @@ def list_reports(
 @router.get("/{report_key}", response_model=ReportDetailRead)
 def get_report(
     report_key: str,
-    tenant_id: str = Depends(get_report_tenant_id),
+    user: CurrentUser = Depends(get_report_user),
     service: ReportCatalogService = Depends(get_report_catalog_service),
 ) -> ReportDetailRead:
-    return service.get_report(tenant_id, report_key)
+    return service.get_report(get_report_tenant_id(user), report_key, user.user_id)
 
 
 @router.get("/{report_key}/lookups/{criteria_key}", response_model=ReportLookupRead)
@@ -83,6 +90,27 @@ def get_report_lookup(
 ) -> ReportLookupRead:
     return service.get_options(
         conn, tenant_id, report_key, criteria_key, q=q, values=values, limit=limit
+    )
+
+
+@router.post(
+    "/{report_key}/actions/{action_key}/resolve",
+    response_model=ReportActionResolveRead,
+)
+def resolve_report_action(
+    report_key: str,
+    action_key: str,
+    payload: ReportActionResolveRequest,
+    user: CurrentUser = Depends(get_report_user),
+    service: ReportActionService = Depends(get_report_action_service),
+) -> ReportActionResolveRead:
+    return service.resolve(
+        get_report_tenant_id(user),
+        user.user_id,
+        report_key,
+        action_key,
+        row=payload.row,
+        criteria=payload.criteria,
     )
 
 

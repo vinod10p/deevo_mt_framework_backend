@@ -13,6 +13,7 @@ from tests.rpt.conftest import (
     OTHER_TENANT_ID,
     TENANT_REPORT_ID,
     TEST_TENANT_ID,
+    TEST_USER_ID,
     minimal_column,
     minimal_criteria,
     minimal_report,
@@ -185,9 +186,19 @@ def test_get_report_builds_detail_without_proc_names() -> None:
             display_order=30,
         ),
     ]
-    db.scalars.side_effect = [resolve_result, resolve_result, columns_result, criteria_result]
+    actions_result = MagicMock()
+    actions_result.all.return_value = []
+    db.scalars.side_effect = [
+        resolve_result,
+        resolve_result,
+        columns_result,
+        criteria_result,
+        actions_result,
+    ]
 
-    detail = ReportCatalogService(db).get_report(TEST_TENANT_ID, "tenant_account_list")
+    detail = ReportCatalogService(db).get_report(
+        TEST_TENANT_ID, "tenant_account_list", TEST_USER_ID
+    )
 
     assert detail.report_key == "tenant_account_list"
     assert detail.default_max_rows == 20000
@@ -196,6 +207,7 @@ def test_get_report_builds_detail_without_proc_names() -> None:
         ("account_type", True),
         ("created_date", False),
     ]
+    assert detail.actions == []
     dumped = detail.model_dump_json()
     assert "proc_name" not in dumped
     assert "lookup_proc" not in dumped
