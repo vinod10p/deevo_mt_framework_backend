@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from mtf.rpt.models import ReportAction, ReportActionParam
 from mtf.rpt.schemas import ReportNavigationRead, ScreenNavigationRead
-from mtf.rpt.services.criteria_validation import validate_report_criteria
+from mtf.rpt.services.criteria_validation import CriteriaSpec, validate_report_criteria
 from mtf.rpt.services.report_catalog import ReportCatalogService
 from mtf.shared.exceptions import forbidden, not_found, validation_error
 from mtf.txn.services.screen_permission import ScreenOperation, ScreenPermissionService
@@ -44,6 +44,32 @@ def map_action_sources(
     if fields:
         validation_error("REPORT_ACTION", "Action could not be resolved", fields)
     return mapped
+
+
+def adapt_mapped_criteria(
+    mapped: Mapping[str, Any],
+    specs: Iterable[CriteriaSpec],
+) -> dict[str, Any]:
+    """Align copied source values with the target report's V1 criterion shapes.
+
+    Grouped-report rows often store a single value (``status: "new"``) while the
+    target list report filters with ``multiselect``. Wrap a non-list, non-dict
+    scalar in a one-item list in that case. Lists, daterange objects, and scalar
+    targets are left unchanged for ``validate_report_criteria``.
+    """
+    by_key = {spec.criteria_key: spec for spec in specs}
+    adapted: dict[str, Any] = {}
+    for key, value in mapped.items():
+        spec = by_key.get(key)
+        if (
+            spec is not None
+            and spec.control_type == "multiselect"
+            and not isinstance(value, (list, dict))
+        ):
+            adapted[key] = [value]
+        else:
+            adapted[key] = value
+    return adapted
 
 
 class ReportActionService:
@@ -120,5 +146,8 @@ class ReportActionService:
         resolved = self._catalog.resolve(tenant_id, target_key)
         return ReportNavigationRead(
             report_key=target_key,
-            criteria=validate_report_criteria(mapped, resolved.criteria),
+            criteria=validate_report_criteria(
+                adapt_mapped_criteria(mapped, resolved.criteria),
+                resolved.criteria,
+            ),
         )

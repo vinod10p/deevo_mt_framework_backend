@@ -276,7 +276,11 @@ Screen target (after `ScreenPermissionService` allows `add` / `view`):
 `mode` is only `add` | `view`. Edit is decided later by the screen envelope.
 
 Report target (after the tenant can see that `report_key`); mapped values are
-validated with `validate_report_criteria()` against the **visible** target report:
+adapted to the target criterion shape, then validated with
+`validate_report_criteria()` against the **visible** target report. A scalar copied
+from a grouped row onto a **multiselect** criterion becomes a one-item list
+(`"new"` → `["new"]`). Lists, daterange objects, and scalar targets are unchanged.
+`/run` still requires a list for multiselect; this wrap is resolve-only.
 
 ```json
 { "target_type": "report", "report_key": "account_summary",
@@ -288,6 +292,9 @@ Errors: `404 REPORT_NOT_FOUND` (source or invisible target report),
 `403 SCREEN_FORBIDDEN` (target screen mode not allowed),
 `422 REPORT_CRITERIA_INVALID` (mapped report-target values fail the V1 contract).
 Never exposes internal ids.
+
+Frontend add-on (copy into the React repo):
+[REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md](REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md).
 
 ### 3. `GET /reports/{report_key}/lookups/{criteria_key}` — lookup options
 **Status: built** (`ReportLookupService`, `mtf/rpt/services/report_lookup.py`).

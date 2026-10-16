@@ -11,6 +11,9 @@ is app-specific. Keep the API facts (§3–§9) unchanged; they describe the bac
 The backend side of the same contract is `prompts/rpt/REPORT_API_PROMPT.md` in this repo; the design
 rationale is `docs/REPORTING_FRAMEWORK_CONTEXT.md`.
 
+Report → report drilldown (actions + resolve) is a follow-on:
+[REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md](REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md).
+
 ---
 
 ## 0. Adapt before use

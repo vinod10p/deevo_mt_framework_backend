@@ -21,6 +21,8 @@ Multi-tenant framework backend for Deevo.
 uv sync --group dev
 cp .env.example .env
 ```
+-- change version in pyproject.toml
+uv lock -- before merging to main and deploying to azure. 
 
 ## Run
 

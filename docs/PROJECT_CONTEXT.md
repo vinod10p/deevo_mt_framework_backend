@@ -153,6 +153,7 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
 | [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
+| [../prompts/rpt/REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_REPORT_DRILLDOWN_PROMPT.md) | Report → report drilldown add-on for the reports React UI |
 | [../prompts/rpt/NEW_REPORT_PROMPT.md](../prompts/rpt/NEW_REPORT_PROMPT.md) | Adding a report — procs, metadata rows per table, worked example, checks |
 | [../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md](../prompts/txn/DEEVOFLOW_LEAD_SCREEN.md) | DeevoFlow product prompt — mount `mtf.txn`, seed Lead screen, lookups, envelope CRUD |
 | [../prompts/txn/DEEVOFLOW_LEAD_REPORT_ACTIONS.md](../prompts/txn/DEEVOFLOW_LEAD_REPORT_ACTIONS.md) | DeevoFlow product prompt — seed Lead list report → Lead screen actions |

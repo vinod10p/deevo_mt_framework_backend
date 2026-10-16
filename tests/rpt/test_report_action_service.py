@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from mtf.rpt.services import ResolvedReport, map_action_sources
+from mtf.rpt.services import ResolvedReport, adapt_mapped_criteria, map_action_sources
 from mtf.rpt.services.report_action import ReportActionService
 from mtf.txn.services.screen_permission import resolve_screen_permissions
 from tests.rpt.conftest import (
@@ -187,6 +187,83 @@ def test_resolve_report_maps_to_target_criteria() -> None:
     assert result.report_key == "account_summary"
     assert result.criteria == {"account_code": "A100"}
     assert TARGET_REPORT_ID not in str(result.model_dump())
+
+
+def test_adapt_wraps_scalar_for_multiselect_only() -> None:
+    specs = [
+        minimal_criteria(
+            criteria_key="status",
+            display_name="Status",
+            control_type="multiselect",
+            lookup_proc=None,
+        ),
+        minimal_criteria(
+            id="01JRPT0CR00000000000000002",
+            criteria_key="owner_id",
+            display_name="Owner",
+            control_type="dropdown",
+            lookup_proc=None,
+        ),
+        minimal_criteria(
+            id="01JRPT0CR00000000000000003",
+            criteria_key="created_date",
+            display_name="Created",
+            data_type="date",
+            control_type="daterange",
+            lookup_proc=None,
+        ),
+    ]
+
+    adapted = adapt_mapped_criteria(
+        {"status": "new", "owner_id": "01JUSER", "created_date": {"from": "2026-01-01"}},
+        specs,
+    )
+
+    assert adapted == {
+        "status": ["new"],
+        "owner_id": "01JUSER",
+        "created_date": {"from": "2026-01-01"},
+    }
+    assert adapt_mapped_criteria({"status": ["new", "lost"]}, specs)["status"] == [
+        "new",
+        "lost",
+    ]
+
+
+def test_resolve_report_wraps_scalar_status_for_target_multiselect() -> None:
+    action = minimal_action(
+        action_key="view_leads",
+        action_type="report",
+        display_location="row",
+        target_screen_id=None,
+        target_report_id=TARGET_REPORT_ID,
+        screen_mode=None,
+    )
+    param = minimal_action_param(source_key="status", target_key="status")
+    result = _service(
+        action=action,
+        params=[param],
+        target_report_key="crm_lead_list",
+        target_criteria=[
+            minimal_criteria(
+                criteria_key="status",
+                display_name="Status",
+                control_type="multiselect",
+                lookup_proc=None,
+            )
+        ],
+    ).resolve(
+        TEST_TENANT_ID,
+        TEST_USER_ID,
+        "crm_lead_summary",
+        "view_leads",
+        row={"status": "new", "count": 12},
+        criteria={},
+    )
+
+    assert result.target_type == "report"
+    assert result.report_key == "crm_lead_list"
+    assert result.criteria == {"status": ["new"]}
 
 
 def test_resolve_report_hidden_target_is_report_404() -> None:
