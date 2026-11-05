@@ -2,6 +2,9 @@
 
 Multi-tenant framework backend for Deevo.
 
+**Author:** Vinod Jain  
+**Copyright:** Deevolight LLC (MIT License)
+
 **Documentation:**
 
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — architecture, API, database, and auth rules (source of truth)
@@ -107,6 +110,5 @@ deevo_mt_framework_backend/
 │   ├── rules/               # File-scoped agent rules
 │   └── skills/              # Task workflow skills
 ├── prompts/                 # Historical codegen prompts
-├── third_party_licenses/
 └── main.py               # Application entry point
 ```

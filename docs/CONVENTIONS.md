@@ -147,7 +147,6 @@ deevo_mt_framework_backend/
 │   │   └── __init__.py
 │   └── audit/
 │       └── __init__.py
-├── third_party_licenses/
 ├── pyproject.toml
 ├── .env.example
 ├── .gitignore
