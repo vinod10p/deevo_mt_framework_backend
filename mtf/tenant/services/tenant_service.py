@@ -8,7 +8,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
 from mtf.shared.db_integrity import is_unique_constraint_violation
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import generate_id
 from mtf.tenant.models import Tenant
@@ -62,7 +70,14 @@ class TenantService:
             not_found("TENANT_TENANT", "Tenant not found")
         return tenant
 
-    def create_tenant(self, data: TenantCreate, *, created_by: str | None = None) -> Tenant:
+    def create_tenant(
+        self,
+        data: TenantCreate,
+        *,
+        created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
+    ) -> Tenant:
         tenant = Tenant(
             id=generate_id(),
             created_by=created_by,
@@ -70,6 +85,15 @@ class TenantService:
             **data.model_dump(exclude_none=True),
         )
         self._db.add(tenant)
+        audit_insert(
+            self._db,
+            entity=tenant,
+            schema_name="tenant",
+            table_name="tenant",
+            actor=actor,
+            source=source,
+            tenant_id=tenant.id,
+        )
         try:
             self._db.commit()
         except IntegrityError as e:
@@ -89,12 +113,15 @@ class TenantService:
         data: TenantUpdate,
         *,
         updated_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> Tenant:
         tenant = self.require_tenant(tenant_id)
 
         if tenant.row_version != data.row_version:
             row_version_conflict("TENANT_TENANT")
 
+        before = row_snapshot(tenant)
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(tenant, key, value)
@@ -104,6 +131,16 @@ class TenantService:
             tenant.updated_by = updated_by
 
         self._db.add(tenant)
+        audit_update(
+            self._db,
+            entity=tenant,
+            schema_name="tenant",
+            table_name="tenant",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant.id,
+        )
         try:
             self._db.commit()
         except IntegrityError as e:
@@ -123,12 +160,15 @@ class TenantService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> Tenant:
         tenant = self.require_tenant(tenant_id)
 
         if row_version is not None and tenant.row_version != row_version:
             row_version_conflict("TENANT_TENANT")
 
+        before = row_snapshot(tenant)
         tenant.is_deleted = True
         tenant.deleted_by = deleted_by
         tenant.updated_at = _utc_naive_now()
@@ -136,6 +176,16 @@ class TenantService:
             tenant.updated_by = deleted_by
 
         self._db.add(tenant)
+        audit_soft_delete(
+            self._db,
+            entity=tenant,
+            schema_name="tenant",
+            table_name="tenant",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant.id,
+        )
         self._db.commit()
         self._db.refresh(tenant)
         return tenant

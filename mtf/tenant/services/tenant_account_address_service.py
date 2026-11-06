@@ -7,6 +7,14 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import not_found, row_version_conflict
 from mtf.shared.security import generate_id
 from mtf.tenant.models import TenantAccount, TenantAccountAddress
@@ -42,6 +50,8 @@ class TenantAccountAddressService:
         account_id: str,
         *,
         keep_address_id: str | None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> None:
         stmt = select(TenantAccountAddress).where(
             TenantAccountAddress.tenant_id == tenant_id,
@@ -53,9 +63,21 @@ class TenantAccountAddressService:
             stmt = stmt.where(TenantAccountAddress.id != keep_address_id)
         now = _utc_naive_now()
         for addr in self._db.scalars(stmt):
+            before = row_snapshot(addr)
             addr.is_default = False
             addr.updated_at = now
             self._db.add(addr)
+            audit_update(
+                self._db,
+                entity=addr,
+                schema_name="tenant",
+                table_name="tenant_account_address",
+                before=before,
+                actor=actor,
+                source=source,
+                tenant_id=tenant_id,
+                account_id=account_id,
+            )
 
     def list_addresses(
         self,
@@ -112,11 +134,19 @@ class TenantAccountAddressService:
         data: TenantAccountAddressCreate,
         *,
         created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccountAddress:
         self._require_account(tenant_id, account_id)
 
         if data.is_default:
-            self._clear_default_flags(tenant_id, account_id, keep_address_id=None)
+            self._clear_default_flags(
+                tenant_id,
+                account_id,
+                keep_address_id=None,
+                actor=actor,
+                source=source,
+            )
 
         row = TenantAccountAddress(
             id=generate_id(),
@@ -127,6 +157,16 @@ class TenantAccountAddressService:
             **data.model_dump(),
         )
         self._db.add(row)
+        audit_insert(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account_address",
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -139,15 +179,24 @@ class TenantAccountAddressService:
         data: TenantAccountAddressUpdate,
         *,
         updated_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccountAddress:
         row = self.require_address(tenant_id, account_id, address_id)
 
         if row.row_version != data.row_version:
             row_version_conflict("TENANT_ACCOUNT_ADDRESS")
 
+        before = row_snapshot(row)
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         if updates.get("is_default") is True:
-            self._clear_default_flags(tenant_id, account_id, keep_address_id=address_id)
+            self._clear_default_flags(
+                tenant_id,
+                account_id,
+                keep_address_id=address_id,
+                actor=actor,
+                source=source,
+            )
 
         for key, value in updates.items():
             setattr(row, key, value)
@@ -157,6 +206,17 @@ class TenantAccountAddressService:
             row.updated_by = updated_by
 
         self._db.add(row)
+        audit_update(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account_address",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -169,12 +229,15 @@ class TenantAccountAddressService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccountAddress:
         row = self.require_address(tenant_id, account_id, address_id)
 
         if row_version is not None and row.row_version != row_version:
             row_version_conflict("TENANT_ACCOUNT_ADDRESS")
 
+        before = row_snapshot(row)
         row.is_deleted = True
         row.deleted_by = deleted_by
         row.updated_at = _utc_naive_now()
@@ -182,6 +245,17 @@ class TenantAccountAddressService:
             row.updated_by = deleted_by
 
         self._db.add(row)
+        audit_soft_delete(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account_address",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row

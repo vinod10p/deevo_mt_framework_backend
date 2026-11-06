@@ -13,7 +13,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
 from mtf.shared.config import get_settings
+from mtf.shared.deps import CurrentUser
 from mtf.tenant.models.mailbox import Mailbox
 from mtf.tenant.models.mailbox_credential import MailboxCredential
 from mtf.tenant.schemas.mailbox import MailboxCreate, MailboxUpdate
@@ -43,7 +51,13 @@ class MailboxService:
         return self._session.scalars(stmt).first()
 
     def create_for_tenant(
-        self, tenant_id: str, payload: MailboxCreate, created_by: str | None = None
+        self,
+        tenant_id: str,
+        payload: MailboxCreate,
+        created_by: str | None = None,
+        *,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> Mailbox:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         mailbox = Mailbox(
@@ -62,17 +76,34 @@ class MailboxService:
             updated_by=created_by,
         )
         self._session.add(mailbox)
+        audit_insert(
+            self._session,
+            entity=mailbox,
+            schema_name="email",
+            table_name="mailbox",
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         self._session.commit()
         self._session.refresh(mailbox)
         return mailbox
 
     def update_for_tenant(
-        self, tenant_id: str, mailbox_id: str, payload: MailboxUpdate, updated_by: str | None = None
+        self,
+        tenant_id: str,
+        mailbox_id: str,
+        payload: MailboxUpdate,
+        updated_by: str | None = None,
+        *,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> Mailbox | None:
         mailbox = self.get_by_id(tenant_id, mailbox_id)
         if not mailbox:
             return None
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        before = row_snapshot(mailbox)
         if payload.display_name is not None:
             mailbox.display_name = payload.display_name
         if payload.mailbox_type is not None:
@@ -81,20 +112,47 @@ class MailboxService:
             mailbox.is_active = payload.is_active
         mailbox.updated_at = now
         mailbox.updated_by = updated_by
+        audit_update(
+            self._session,
+            entity=mailbox,
+            schema_name="email",
+            table_name="mailbox",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         self._session.commit()
         self._session.refresh(mailbox)
         return mailbox
 
     def delete_for_tenant(
-        self, tenant_id: str, mailbox_id: str, deleted_by: str | None = None
+        self,
+        tenant_id: str,
+        mailbox_id: str,
+        deleted_by: str | None = None,
+        *,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> bool:
         mailbox = self.get_by_id(tenant_id, mailbox_id)
         if not mailbox:
             return False
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        before = row_snapshot(mailbox)
         mailbox.is_deleted = True
         mailbox.deleted_at = now
         mailbox.deleted_by = deleted_by
+        audit_soft_delete(
+            self._session,
+            entity=mailbox,
+            schema_name="email",
+            table_name="mailbox",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         self._session.commit()
         return True
 

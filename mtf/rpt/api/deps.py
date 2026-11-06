@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Any
 
-from fastapi import Depends, Request
+from fastapi import Depends
 
+from mtf.audit.api.deps import get_audit_source as get_audit_source
 from mtf.rpt.execution import open_report_connection
-from mtf.rpt.services import AuditSource
 from mtf.shared.deps import CurrentUser, require_any_scope
 from mtf.shared.exceptions import forbidden
 
@@ -26,14 +26,6 @@ def get_report_user(user: CurrentUser = Depends(require_report_user)) -> Current
     """Tenant or portal caller with a tenant in the JWT."""
     get_report_tenant_id(user)
     return user
-
-
-def get_audit_source(request: Request) -> AuditSource:
-    """Client IP and user agent for ``audit.audit_log``."""
-    return AuditSource(
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
 
 
 def get_report_connection(

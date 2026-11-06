@@ -13,6 +13,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.schemas import UserMeRead
 from mtf.auth.schemas.session import LoginRequest, RefreshRequest, TokenResponse
 from mtf.auth.services import TenantAccountUserService, TenantUserService, UserService
@@ -70,23 +72,19 @@ def _raw_access_token_from_request(request: Request) -> str:
 @router.post("/login", response_model=TokenResponse)
 def login(
     payload: LoginRequest,
-    request: Request,
+    source: AuditSource = Depends(get_audit_source),
     service: SessionService = Depends(get_session_service),
 ) -> TokenResponse:
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    return service.login(payload, ip_address=ip_address, user_agent=user_agent)
+    return service.login(payload, source=source)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh_token(
     payload: RefreshRequest,
-    request: Request,
+    source: AuditSource = Depends(get_audit_source),
     service: SessionService = Depends(get_session_service),
 ) -> TokenResponse:
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-    return service.refresh(payload, ip_address=ip_address, user_agent=user_agent)
+    return service.refresh(payload, source=source)
 
 
 @router.get("/me", response_model=UserMeRead)
@@ -184,30 +182,25 @@ def get_me(
 def logout(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
+    source: AuditSource = Depends(get_audit_source),
     service: SessionService = Depends(get_session_service),
 ) -> None:
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
     raw_token = _raw_access_token_from_request(request)
     service.logout(
         raw_token,
         current_user.user_id,
-        ip_address=ip_address,
-        user_agent=user_agent,
+        source=source,
     )
 
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
 def logout_all(
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
+    source: AuditSource = Depends(get_audit_source),
     service: SessionService = Depends(get_session_service),
 ) -> None:
-    ip_address = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
     service.logout_all(
         user_id=current_user.user_id,
         current_user_id=current_user.user_id,
-        ip_address=ip_address,
-        user_agent=user_agent,
+        source=source,
     )

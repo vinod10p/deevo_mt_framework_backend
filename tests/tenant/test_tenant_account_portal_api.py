@@ -197,9 +197,8 @@ def test_delete_account_portal_user_admin() -> None:
     client = TestClient(app)
     r = client.delete(f"/api/account/users/{OTHER_USER_ID}")
     assert r.status_code == 204
-    user_svc.soft_delete_for_account.assert_called_once_with(
-        TEST_TENANT_ID,
-        TEST_ACCOUNT_ID,
-        OTHER_USER_ID,
-        deleted_by=TEST_USER_ID,
-    )
+    args, kwargs = user_svc.soft_delete_for_account.call_args
+    assert args == (TEST_TENANT_ID, TEST_ACCOUNT_ID, OTHER_USER_ID)
+    assert kwargs["deleted_by"] == TEST_USER_ID
+    assert kwargs["actor"].user_id == TEST_USER_ID
+    assert kwargs["source"].request_id is not None

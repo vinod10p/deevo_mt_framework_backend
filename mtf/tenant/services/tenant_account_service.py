@@ -7,6 +7,14 @@ from datetime import datetime, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import generate_id
 from mtf.tenant.models import Tenant, TenantAccount
@@ -127,6 +135,8 @@ class TenantAccountService:
         tenant_id: str,
         *,
         created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccount:
         self._require_tenant_row(tenant_id)
 
@@ -145,6 +155,16 @@ class TenantAccountService:
             **payload,
         )
         self._db.add(row)
+        audit_insert(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account",
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=row.id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -156,12 +176,15 @@ class TenantAccountService:
         data: TenantAccountUpdate,
         *,
         updated_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccount:
         row = self.require_account(tenant_id, account_id)
 
         if row.row_version != data.row_version:
             row_version_conflict("TENANT_ACCOUNT")
 
+        before = row_snapshot(row)
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         if "account_code" in updates:
             new_code = updates["account_code"].strip()
@@ -178,6 +201,17 @@ class TenantAccountService:
             row.updated_by = updated_by
 
         self._db.add(row)
+        audit_update(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=row.id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -189,12 +223,15 @@ class TenantAccountService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccount:
         row = self.require_account(tenant_id, account_id)
 
         if row_version is not None and row.row_version != row_version:
             row_version_conflict("TENANT_ACCOUNT")
 
+        before = row_snapshot(row)
         row.is_deleted = True
         row.deleted_by = deleted_by
         row.updated_at = _utc_naive_now()
@@ -202,6 +239,17 @@ class TenantAccountService:
             row.updated_by = deleted_by
 
         self._db.add(row)
+        audit_soft_delete(
+            self._db,
+            entity=row,
+            schema_name="tenant",
+            table_name="tenant_account",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=row.id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row

@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.services import TenantAccountUserService, TenantUserService
 from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination, require_scope
 from mtf.shared.exceptions import raise_if_not_found
@@ -149,9 +151,15 @@ def get_tenant(
 def create_tenant(
     payload: TenantCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantService = Depends(get_tenant_service),
 ) -> TenantRead:
-    return service.create_tenant(payload, created_by=current_user.user_id)
+    return service.create_tenant(
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.patch("/{tenant_id}", response_model=TenantRead)
@@ -159,18 +167,31 @@ def update_tenant(
     tenant_id: str,
     payload: TenantUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantService = Depends(get_tenant_service),
 ) -> TenantRead:
-    return service.update_tenant(tenant_id, payload, updated_by=current_user.user_id)
+    return service.update_tenant(
+        tenant_id,
+        payload,
+        updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tenant(
     tenant_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantService = Depends(get_tenant_service),
 ) -> Response:
-    service.soft_delete_tenant(tenant_id, deleted_by=current_user.user_id)
+    service.soft_delete_tenant(
+        tenant_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -190,9 +211,16 @@ def create_tenant_user(
     tenant_id: str,
     payload: TenantUserCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> TenantUserRead:
-    return service.create_for_tenant(tenant_id, payload, created_by=current_user.user_id)
+    return service.create_for_tenant(
+        tenant_id,
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.patch("/{tenant_id}/users/{user_id}", response_model=TenantUserRead)
@@ -201,6 +229,7 @@ def update_tenant_user(
     user_id: str,
     payload: TenantUserUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> TenantUserRead:
     return service.update_for_tenant(
@@ -208,6 +237,8 @@ def update_tenant_user(
         user_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -216,9 +247,16 @@ def delete_tenant_user(
     tenant_id: str,
     user_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> Response:
-    service.soft_delete_for_tenant(tenant_id, user_id, deleted_by=current_user.user_id)
+    service.soft_delete_for_tenant(
+        tenant_id,
+        user_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -238,9 +276,16 @@ def create_tenant_mailbox(
     tenant_id: str,
     payload: MailboxCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: MailboxService = Depends(get_mailbox_service),
 ) -> MailboxRead:
-    return service.create_for_tenant(tenant_id, payload, created_by=current_user.user_id)
+    return service.create_for_tenant(
+        tenant_id,
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.patch("/{tenant_id}/mailboxes/{mailbox_id}", response_model=MailboxRead)
@@ -249,9 +294,17 @@ def update_tenant_mailbox(
     mailbox_id: str,
     payload: MailboxUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: MailboxService = Depends(get_mailbox_service),
 ) -> MailboxRead:
-    mb = service.update_for_tenant(tenant_id, mailbox_id, payload, updated_by=current_user.user_id)
+    mb = service.update_for_tenant(
+        tenant_id,
+        mailbox_id,
+        payload,
+        updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     if not mb:
         raise HTTPException(status_code=404, detail={"code": "MAILBOX_NOT_FOUND", "message": "Mailbox not found"})
     return mb
@@ -262,9 +315,16 @@ def delete_tenant_mailbox(
     tenant_id: str,
     mailbox_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: MailboxService = Depends(get_mailbox_service),
 ) -> Response:
-    success = service.delete_for_tenant(tenant_id, mailbox_id, deleted_by=current_user.user_id)
+    success = service.delete_for_tenant(
+        tenant_id,
+        mailbox_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     if not success:
         raise HTTPException(status_code=404, detail={"code": "MAILBOX_NOT_FOUND", "message": "Mailbox not found"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -324,9 +384,16 @@ def create_tenant_account(
     tenant_id: str,
     payload: TenantAccountCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> TenantAccountRead:
-    return service.create(payload, tenant_id, created_by=current_user.user_id)
+    return service.create(
+        payload,
+        tenant_id,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.get("/{tenant_id}/accounts", response_model=TenantAccountListResponse)
@@ -371,9 +438,17 @@ def update_tenant_account(
     account_id: str,
     payload: TenantAccountUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> TenantAccountRead:
-    return service.update(account_id, tenant_id, payload, updated_by=current_user.user_id)
+    return service.update(
+        account_id,
+        tenant_id,
+        payload,
+        updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.delete("/{tenant_id}/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -381,9 +456,16 @@ def delete_tenant_account(
     tenant_id: str,
     account_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> Response:
-    service.soft_delete(account_id, tenant_id, deleted_by=current_user.user_id)
+    service.soft_delete(
+        account_id,
+        tenant_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -409,6 +491,7 @@ def create_tenant_account_user(
     account_id: str,
     payload: TenantAccountUserCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     return service.create_for_account(
@@ -416,6 +499,8 @@ def create_tenant_account_user(
         account_id,
         payload,
         created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -429,6 +514,7 @@ def update_tenant_account_user(
     user_id: str,
     payload: TenantAccountUserUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     return service.update_for_account(
@@ -437,6 +523,8 @@ def update_tenant_account_user(
         user_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -449,6 +537,7 @@ def delete_tenant_account_user(
     account_id: str,
     user_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> Response:
     service.soft_delete_for_account(
@@ -456,6 +545,8 @@ def delete_tenant_account_user(
         account_id,
         user_id,
         deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -470,9 +561,17 @@ def create_tenant_account_address(
     account_id: str,
     payload: TenantAccountAddressCreate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> TenantAccountAddressRead:
-    return service.create(tenant_id, account_id, payload, created_by=current_user.user_id)
+    return service.create(
+        tenant_id,
+        account_id,
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.get(
@@ -518,6 +617,7 @@ def update_tenant_account_address(
     address_id: str,
     payload: TenantAccountAddressUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> TenantAccountAddressRead:
     return service.update(
@@ -526,6 +626,8 @@ def update_tenant_account_address(
         address_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -538,6 +640,7 @@ def delete_tenant_account_address(
     account_id: str,
     address_id: str,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> Response:
     service.soft_delete(
@@ -545,5 +648,7 @@ def delete_tenant_account_address(
         account_id,
         address_id,
         deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

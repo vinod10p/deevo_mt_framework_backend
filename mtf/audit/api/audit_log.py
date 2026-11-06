@@ -1,62 +1,60 @@
-"""HTTP routes — ``audit.audit_log`` resource."""
+"""HTTP routes — ``audit.audit_log`` resource (read-only)."""
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query
 
-from mtf.audit.schemas import AuditLogCreate, AuditLogRead
+from mtf.audit.api.deps import get_audit_service, require_audit_reader
+from mtf.audit.schemas import AuditLogRead
 from mtf.audit.service import AuditLogService
-from mtf.shared.deps import get_db
+from mtf.shared.deps import CurrentUser, PaginationParams, get_pagination
+from mtf.shared.exceptions import not_found
 
-router = APIRouter()
-
-
-def get_audit_service(db: Session = Depends(get_db)) -> AuditLogService:
-    return AuditLogService(db)
+router = APIRouter(tags=["audit"])
 
 
 @router.get("/logs", response_model=list[AuditLogRead])
 def list_logs(
-    tenant_id: Optional[str] = None,
+    user: CurrentUser = Depends(require_audit_reader),
+    tenant_id: Optional[str] = Query(
+        None,
+        description="System-only filter. Tenant and portal callers are scoped from the JWT.",
+    ),
+    account_id: Optional[str] = Query(
+        None,
+        description="Filter for system and tenant staff. Portal uses the JWT account.",
+    ),
     user_id: Optional[str] = None,
     action: Optional[str] = None,
     schema_name: Optional[str] = None,
     table_name: Optional[str] = None,
     record_id: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    request_id: Optional[str] = None,
+    pagination: PaginationParams = Depends(get_pagination),
     service: AuditLogService = Depends(get_audit_service),
 ) -> list[AuditLogRead]:
     return service.list_logs(
+        user,
         tenant_id=tenant_id,
+        account_id=account_id,
         user_id=user_id,
         action=action,
         schema_name=schema_name,
         table_name=table_name,
         record_id=record_id,
-        skip=skip,
-        limit=limit,
+        request_id=request_id,
+        skip=pagination.skip,
+        limit=pagination.limit,
     )
 
 
 @router.get("/logs/{log_id}", response_model=AuditLogRead)
 def get_log(
     log_id: str,
+    user: CurrentUser = Depends(require_audit_reader),
     service: AuditLogService = Depends(get_audit_service),
 ) -> AuditLogRead:
-    log = service.get_log(log_id)
+    log = service.get_log(user, log_id)
     if not log:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "AUDIT_LOG_NOT_FOUND", "message": "Audit log entry not found"},
-        )
+        not_found("AUDIT_LOG", "Audit log entry not found")
     return log
-
-
-@router.post("/logs", response_model=AuditLogRead, status_code=201)
-def create_log(
-    payload: AuditLogCreate,
-    service: AuditLogService = Depends(get_audit_service),
-) -> AuditLogRead:
-    return service.create_log(payload)

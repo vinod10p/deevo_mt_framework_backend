@@ -28,7 +28,11 @@ from tests.rpt.conftest import (
 )
 
 NEW_ROW_VERSION = b"\x00\x00\x00\x00\x00\x00\x00\x09"
-SOURCE = AuditSource(ip_address="10.0.0.1", user_agent="pytest")
+SOURCE = AuditSource(
+    ip_address="10.0.0.1",
+    user_agent="pytest",
+    request_id="01JREQ00000000000000000001",
+)
 
 
 def _resolved(report=None) -> ResolvedReport:
@@ -118,6 +122,7 @@ def test_create_user_view_stores_versioned_json_and_audits() -> None:
         "insert", view.id, "rpt", "report_saved_view"
     )
     assert (audit.ip_address, audit.user_agent, audit.user_type) == ("10.0.0.1", "pytest", "tenant")
+    assert audit.request_id == SOURCE.request_id
     assert json.loads(audit.new_values)["view_name"] == "Q3 Review"
     db.commit.assert_called_once()
 
@@ -315,8 +320,11 @@ def test_delete_soft_deletes_clears_default_and_audits() -> None:
     assert view.is_deleted is True and view.is_default is False
     assert view.deleted_by == view.updated_by == TEST_USER_ID
     [audit] = _added(db, AuditLog)
-    assert audit.action == "delete" and audit.new_values is None
+    assert audit.action == "delete"
+    assert json.loads(audit.old_values)["is_deleted"] is False
+    assert json.loads(audit.new_values)["is_deleted"] is True
     assert json.loads(audit.old_values)["is_default"] is True
+    assert json.loads(audit.new_values)["is_default"] is False
     db.commit.assert_called_once()
     db.flush.assert_not_called()
 

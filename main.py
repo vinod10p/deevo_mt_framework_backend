@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mtf.audit.api import router as audit_router
+from mtf.audit.middleware import AuditRequestIdMiddleware
 from mtf.auth.api import router as auth_router
 from mtf.rpt.api import router as rpt_router
 from mtf.shared.config import get_settings
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuditRequestIdMiddleware)
 
 
 @app.get("/health")

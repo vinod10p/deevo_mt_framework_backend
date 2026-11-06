@@ -10,9 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
 from mtf.auth.models import TenantUser, User
 from mtf.auth.schemas.tenant_user import TenantMembershipCreate, TenantMembershipUpdate
 from mtf.shared.db_integrity import is_unique_constraint_violation
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
 from mtf.shared.security import generate_id, hash_password
 from mtf.tenant.models import Tenant
@@ -201,6 +209,8 @@ class TenantUserService:
         data: Any,
         *,
         created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> dict[str, Any]:
         self._require_tenant(tenant_id)
 
@@ -216,6 +226,7 @@ class TenantUserService:
             if self._existing_membership(tenant_id, existing.id) is not None:
                 self._raise_email_in_use()
             user = existing
+            before_user = row_snapshot(user)
             if data.first_name is not None:
                 user.first_name = data.first_name
             if data.last_name is not None:
@@ -230,6 +241,16 @@ class TenantUserService:
             user.updated_by = created_by
             user.updated_at = now
             self._db.add(user)
+            audit_update(
+                self._db,
+                entity=user,
+                schema_name="auth",
+                table_name="app_user",
+                before=before_user,
+                actor=actor,
+                source=source,
+                tenant_id=tenant_id,
+            )
         else:
             if not password:
                 bad_request("USER", "Password is required for new users")
@@ -248,6 +269,15 @@ class TenantUserService:
             )
             self._db.add(user)
             self._db.flush()
+            audit_insert(
+                self._db,
+                entity=user,
+                schema_name="auth",
+                table_name="app_user",
+                actor=actor,
+                source=source,
+                tenant_id=tenant_id,
+            )
 
         row = TenantUser(
             id=generate_id(),
@@ -259,6 +289,15 @@ class TenantUserService:
             updated_by=created_by,
         )
         self._db.add(row)
+        audit_insert(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         try:
             self._db.commit()
         except IntegrityError as exc:
@@ -278,6 +317,8 @@ class TenantUserService:
         *,
         updated_by: str | None = None,
         actor_membership: TenantUser | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> dict[str, Any]:
         row = self._membership_by_tenant_and_user(tenant_id, user_id)
         if row is None:
@@ -297,6 +338,10 @@ class TenantUserService:
             elif data.role is not None and data.role == "owner":
                 conflict("TENANT_USER", "Cannot assign owner role to yourself")
 
+        now = _utc_naive_now()
+        before_row = row_snapshot(row)
+        before_user = row_snapshot(user)
+
         if data.role is not None and data.role != row.role:
             if row.role == "owner" and self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
                 conflict("TENANT_USER", "Cannot remove the last owner from the tenant")
@@ -307,8 +352,6 @@ class TenantUserService:
                 if self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
                     conflict("TENANT_USER", "Cannot deactivate the last owner")
             row.is_active = data.is_active
-
-        now = _utc_naive_now()
         if data.first_name is not None:
             user.first_name = data.first_name
         if data.last_name is not None:
@@ -329,6 +372,26 @@ class TenantUserService:
 
         self._db.add(row)
         self._db.add(user)
+        audit_update(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            before=before_row,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
+        audit_update(
+            self._db,
+            entity=user,
+            schema_name="auth",
+            table_name="app_user",
+            before=before_user,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         self._db.refresh(user)
@@ -341,6 +404,8 @@ class TenantUserService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantUser:
         row = self._membership_by_tenant_and_user(tenant_id, user_id)
         if row is None:
@@ -352,6 +417,7 @@ class TenantUserService:
         if row.role == "owner" and self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
             conflict("TENANT_USER", "Cannot remove the last owner from the tenant")
 
+        before = row_snapshot(row)
         row.is_active = False
         row.is_deleted = True
         row.deleted_by = deleted_by
@@ -360,11 +426,28 @@ class TenantUserService:
             row.updated_by = deleted_by
 
         self._db.add(row)
+        audit_soft_delete(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
 
-    def create(self, data: TenantMembershipCreate, *, created_by: str | None = None) -> TenantUser:
+    def create(
+        self,
+        data: TenantMembershipCreate,
+        *,
+        created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
+    ) -> TenantUser:
         self._require_tenant(data.tenant_id)
 
         user = self._db.scalars(
@@ -393,6 +476,15 @@ class TenantUserService:
             updated_by=created_by,
         )
         self._db.add(row)
+        audit_insert(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            actor=actor,
+            source=source,
+            tenant_id=data.tenant_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -403,6 +495,8 @@ class TenantUserService:
         data: TenantMembershipUpdate,
         *,
         updated_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantUser:
         row = self.get(tenant_user_id)
         if row is None:
@@ -411,6 +505,7 @@ class TenantUserService:
         if row.row_version != data.row_version:
             row_version_conflict("TENANT_USER")
 
+        before = row_snapshot(row)
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(row, key, value)
@@ -420,6 +515,16 @@ class TenantUserService:
             row.updated_by = updated_by
 
         self._db.add(row)
+        audit_update(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=row.tenant_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -430,6 +535,8 @@ class TenantUserService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantUser:
         row = self.get(tenant_user_id)
         if row is None:
@@ -438,6 +545,7 @@ class TenantUserService:
         if row_version is not None and row.row_version != row_version:
             row_version_conflict("TENANT_USER")
 
+        before = row_snapshot(row)
         row.is_deleted = True
         row.deleted_by = deleted_by
         row.updated_at = _utc_naive_now()
@@ -445,6 +553,16 @@ class TenantUserService:
             row.updated_by = deleted_by
 
         self._db.add(row)
+        audit_soft_delete(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_user",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=row.tenant_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row

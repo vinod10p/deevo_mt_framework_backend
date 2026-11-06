@@ -189,7 +189,7 @@ def test_delete_tenant_returns_204() -> None:
     client = TestClient(app)
     r = client.delete(f"/api/tenant/{TEST_TENANT_ID}")
     assert r.status_code == 204
-    svc.soft_delete_tenant.assert_called_once_with(
-        TEST_TENANT_ID,
-        deleted_by=TEST_SYSTEM_USER_ID,
-    )
+    _, kwargs = svc.soft_delete_tenant.call_args
+    assert kwargs["deleted_by"] == TEST_SYSTEM_USER_ID
+    assert kwargs["actor"].user_id == TEST_SYSTEM_USER_ID
+    assert kwargs["source"].request_id is not None

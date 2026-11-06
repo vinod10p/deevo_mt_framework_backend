@@ -127,11 +127,11 @@ def test_get_patch_delete_account() -> None:
 
     dr = client.delete(base)
     assert dr.status_code == 204
-    svc.soft_delete.assert_called_once_with(
-        TEST_ACCOUNT_ID,
-        TEST_TENANT_ID,
-        deleted_by=TEST_USER_ID,
-    )
+    args, kwargs = svc.soft_delete.call_args
+    assert args == (TEST_ACCOUNT_ID, TEST_TENANT_ID)
+    assert kwargs["deleted_by"] == TEST_USER_ID
+    assert kwargs["actor"].user_id == TEST_USER_ID
+    assert kwargs["source"].request_id is not None
 
 
 def test_account_user_routes() -> None:

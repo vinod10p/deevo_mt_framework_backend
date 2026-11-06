@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.services.tenant_account_user import TenantAccountUserService
 from mtf.shared.deps import (
     CurrentUser,
@@ -58,9 +60,16 @@ def create_account(
     payload: TenantAccountCreate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> TenantAccountRead:
-    return service.create(payload, tenant_id, created_by=current_user.user_id)
+    return service.create(
+        payload,
+        tenant_id,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.get("", response_model=TenantAccountListResponse)
@@ -105,9 +114,17 @@ def update_account(
     payload: TenantAccountUpdate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> TenantAccountRead:
-    return service.update(account_id, tenant_id, payload, updated_by=current_user.user_id)
+    return service.update(
+        account_id,
+        tenant_id,
+        payload,
+        updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,9 +132,16 @@ def delete_account(
     account_id: str,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountService = Depends(get_tenant_account_service),
 ) -> Response:
-    service.soft_delete(account_id, tenant_id, deleted_by=current_user.user_id)
+    service.soft_delete(
+        account_id,
+        tenant_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -154,6 +178,7 @@ def create_account_user(
     payload: TenantAccountUserCreate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     service.assert_can_manage_account_users(tenant_id, account_id, current_user.user_id)
@@ -162,6 +187,8 @@ def create_account_user(
         account_id,
         payload,
         created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -172,6 +199,7 @@ def update_account_user(
     payload: TenantAccountUserUpdate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     service.assert_can_manage_account_users(tenant_id, account_id, current_user.user_id)
@@ -181,6 +209,8 @@ def update_account_user(
         user_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -190,6 +220,7 @@ def delete_account_user(
     user_id: str,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> Response:
     service.assert_can_manage_account_users(tenant_id, account_id, current_user.user_id)
@@ -198,6 +229,8 @@ def delete_account_user(
         account_id,
         user_id,
         deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -212,9 +245,17 @@ def create_account_address(
     payload: TenantAccountAddressCreate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> TenantAccountAddressRead:
-    return service.create(tenant_id, account_id, payload, created_by=current_user.user_id)
+    return service.create(
+        tenant_id,
+        account_id,
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.get("/{account_id}/addresses", response_model=list[TenantAccountAddressRead])
@@ -251,6 +292,7 @@ def update_account_address(
     payload: TenantAccountAddressUpdate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> TenantAccountAddressRead:
     return service.update(
@@ -259,6 +301,8 @@ def update_account_address(
         address_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -271,6 +315,7 @@ def delete_account_address(
     address_id: str,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountAddressService = Depends(get_tenant_account_address_service),
 ) -> Response:
     service.soft_delete(
@@ -278,5 +323,7 @@ def delete_account_address(
         account_id,
         address_id,
         deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

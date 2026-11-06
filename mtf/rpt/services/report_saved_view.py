@@ -6,7 +6,6 @@ import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
-from mtf.audit.models import AuditLog
+from mtf.audit.schemas import AuditAction
+from mtf.audit.service import AuditSource, append_audit_log
 from mtf.rpt.models import ReportDefinition, ReportSavedView
 from mtf.rpt.schemas import ReportSavedViewCreate, ReportSavedViewRead, ReportSavedViewUpdate
 from mtf.rpt.services.criteria_validation import criteria_to_json, validate_report_criteria
@@ -37,14 +37,6 @@ _DOMAIN = "REPORT_VIEW"
 
 #: UQ_report_saved_view_{system,tenant,user}_default — one default per tier.
 _DEFAULT_INDEX = re.compile(r"UQ_report_saved_view_\w+_default", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class AuditSource:
-    """Request origin recorded on ``audit.audit_log`` rows."""
-
-    ip_address: str | None = None
-    user_agent: str | None = None
 
 
 def _stored_object(raw: str) -> dict[str, Any]:
@@ -209,7 +201,14 @@ class ReportSavedViewService:
             view.deleted_by = user.user_id
             view.updated_by = user.user_id
             view.updated_at = _utc_naive_now()
-            self._audit(user, source, "delete", view.id, old_values=old_values)
+            self._audit(
+                user,
+                source,
+                "delete",
+                view.id,
+                old_values=old_values,
+                new_values=_snapshot(view),
+            )
             self._db.commit()
 
     # ---------------------------------------------------------------- helpers
@@ -310,28 +309,22 @@ class ReportSavedViewService:
         self,
         user: CurrentUser,
         source: AuditSource | None,
-        action: str,
+        action: AuditAction,
         record_id: str,
         *,
         old_values: dict[str, Any] | None = None,
         new_values: dict[str, Any] | None = None,
     ) -> None:
-        source = source or AuditSource()
-        self._db.add(
-            AuditLog(
-                id=generate_id(),
-                tenant_id=user.tenant_id,
-                user_id=user.user_id,
-                user_type=user.user_scope,
-                schema_name="rpt",
-                table_name="report_saved_view",
-                record_id=record_id,
-                action=action,
-                old_values=json.dumps(old_values) if old_values is not None else None,
-                new_values=json.dumps(new_values) if new_values is not None else None,
-                ip_address=source.ip_address,
-                user_agent=source.user_agent,
-            )
+        append_audit_log(
+            self._db,
+            action=action,
+            actor=user,
+            source=source,
+            schema_name="rpt",
+            table_name="report_saved_view",
+            record_id=record_id,
+            old_values=old_values,
+            new_values=new_values,
         )
 
     @contextmanager

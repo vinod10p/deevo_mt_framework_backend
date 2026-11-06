@@ -3,6 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.schemas import UserCreate, UserRead, UserUpdate
 from mtf.auth.services import UserService
 from mtf.shared.deps import CurrentUser, get_db, require_scope
@@ -27,10 +29,11 @@ def list_users(
 @router.post("/users", response_model=UserRead, status_code=201)
 def create_user(
     payload: UserCreate,
-    _current_user: CurrentUser = Depends(require_scope("system")),
+    current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: UserService = Depends(get_user_service),
 ) -> UserRead:
-    return service.create_user(payload)
+    return service.create_user(payload, actor=current_user, source=source)
 
 
 @router.get("/users/{user_id}", response_model=UserRead)
@@ -50,6 +53,13 @@ def update_user(
     user_id: str,
     payload: UserUpdate,
     current_user: CurrentUser = Depends(require_scope("system")),
+    source: AuditSource = Depends(get_audit_source),
     service: UserService = Depends(get_user_service),
 ) -> UserRead:
-    return service.update_user(user_id, payload, updated_by=current_user.user_id)
+    return service.update_user(
+        user_id,
+        payload,
+        updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )

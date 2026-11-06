@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
+from typing import Never
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mtf.audit.models import AuditLog
-from fastapi import HTTPException
-
+from mtf.audit.service import AuditSource, append_audit_log
 from mtf.auth.models.session import AuthSession
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.tenant_user import TenantUser
@@ -50,26 +49,32 @@ class SessionService:
     def login(
         self,
         request: LoginRequest,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
+        *,
+        source: AuditSource | None = None,
     ) -> TokenResponse:
         now = _utc_naive_now()
         email_norm = request.email.strip().lower()
+        source = source or AuditSource()
 
         user = self._get_active_user_by_email(email_norm)
         if user is None:
-            unauthorized("AUTH", _AUTH_GENERIC)
+            self._reject_login(source, email_norm)
 
         if user.locked_until is not None and user.locked_until > now:
-            unauthorized("AUTH", "Account is temporarily locked")
+            self._reject_login(
+                source,
+                email_norm,
+                user=user,
+                reason="locked",
+                message="Account is temporarily locked",
+            )
 
         if not verify_password(request.password, user.password_hash or ""):
             user.failed_login_count = user.failed_login_count + 1
             if user.failed_login_count >= _MAX_FAILED_LOGINS:
                 user.locked_until = now + timedelta(minutes=_LOCKOUT_MINUTES)
             self._db.add(user)
-            self._db.commit()
-            unauthorized("AUTH", _AUTH_GENERIC)
+            self._reject_login(source, email_norm, user=user)
 
         user.failed_login_count = 0
         user.locked_until = None
@@ -84,21 +89,30 @@ class SessionService:
             pass
         elif user.user_scope == "tenant":
             if request.tenant_id is None:
-                unauthorized("AUTH", _TENANT_REQUIRED)
+                self._reject_login(
+                    source, email_norm, user=user, reason="tenant_required",
+                    message=_TENANT_REQUIRED,
+                )
             self._require_active_tenant(request.tenant_id)
             membership = self._get_active_tenant_membership(user.id, request.tenant_id)
             if membership is None:
-                unauthorized("AUTH", _AUTH_GENERIC)
+                self._reject_login(
+                    source, email_norm, user=user, tenant_id=request.tenant_id,
+                    reason="no_membership",
+                )
             tenant_id = request.tenant_id
         elif user.user_scope == "tenant_account":
             if request.tenant_id is None:
-                unauthorized("AUTH", _TENANT_REQUIRED)
+                self._reject_login(
+                    source, email_norm, user=user, reason="tenant_required",
+                    message=_TENANT_REQUIRED,
+                )
             self._require_active_tenant(request.tenant_id)
             account_id = self._require_single_account_membership(user.id, request.tenant_id)
             tenant_id = request.tenant_id
             account_name = self._account_name(account_id)
         else:
-            unauthorized("AUTH", _AUTH_GENERIC)
+            self._reject_login(source, email_norm, user=user, reason="invalid_scope")
 
         session_id = generate_id()
         access_token = create_access_token(
@@ -122,21 +136,23 @@ class SessionService:
             refresh_token_hash=refresh_h,
             auth_method="password",
             created_from=request.created_from,
-            ip_address=ip_address,
-            user_agent=user_agent,
+            ip_address=source.ip_address,
+            user_agent=source.user_agent,
         )
         self._db.add(session)
 
-        self._write_audit(
+        append_audit_log(
+            self._db,
             action="login",
+            source=self._source(source, session_id=session.id),
+            schema_name="auth",
+            table_name="session",
             record_id=session.id,
             user_id=user.id,
+            user_type=user.user_scope,
             tenant_id=tenant_id,
-            audit_user_scope=user.user_scope,
-            audit_session_id=session.id,
+            account_id=account_id,
             new_values={"event": "login"},
-            ip_address=ip_address,
-            user_agent=user_agent,
         )
 
         self._db.commit()
@@ -192,8 +208,8 @@ class SessionService:
     def refresh(
         self,
         request: RefreshRequest,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
+        *,
+        source: AuditSource | None = None,
     ) -> TokenResponse:
         settings = get_settings()
         now = _utc_naive_now()
@@ -247,19 +263,10 @@ class SessionService:
         session.refresh_expires_at = now + timedelta(days=settings.jwt_refresh_token_expire_days)
         session.last_activity = now
         session.updated_at = now
+        if source is not None:
+            session.ip_address = source.ip_address
+            session.user_agent = source.user_agent
         self._db.add(session)
-
-        self._write_audit(
-            action="update",
-            record_id=session.id,
-            user_id=session.user_id,
-            tenant_id=session.tenant_id,
-            audit_user_scope=user.user_scope,
-            audit_session_id=session.id,
-            new_values={"event": "refresh_token_rotated"},
-            ip_address=ip_address,
-            user_agent=user_agent,
-        )
 
         self._db.commit()
 
@@ -281,8 +288,8 @@ class SessionService:
         self,
         raw_access_token: str,
         current_user_id: str,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
+        *,
+        source: AuditSource | None = None,
     ) -> None:
         now = _utc_naive_now()
         th = hash_token(raw_access_token)
@@ -298,16 +305,17 @@ class SessionService:
         self._db.add(session)
 
         audit_user_scope = self._user_scope_for_audit(session.user_id)
-        self._write_audit(
+        append_audit_log(
+            self._db,
             action="logout",
+            source=self._source(source, session_id=session.id),
+            schema_name="auth",
+            table_name="session",
             record_id=session.id,
             user_id=session.user_id,
+            user_type=audit_user_scope,
             tenant_id=session.tenant_id,
-            audit_user_scope=audit_user_scope,
-            audit_session_id=session.id,
             new_values={"event": "logout"},
-            ip_address=ip_address,
-            user_agent=user_agent,
         )
         self._db.commit()
 
@@ -315,8 +323,8 @@ class SessionService:
         self,
         user_id: str,
         current_user_id: str,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
+        *,
+        source: AuditSource | None = None,
     ) -> int:
         now = _utc_naive_now()
         stmt = select(AuthSession).where(
@@ -335,16 +343,17 @@ class SessionService:
 
         if sessions:
             audit_user_scope = self._user_scope_for_audit(user_id)
-            self._write_audit(
+            append_audit_log(
+                self._db,
                 action="logout",
+                source=self._source(source, session_id=sessions[0].id),
+                schema_name="auth",
+                table_name="session",
                 record_id=sessions[0].id,
                 user_id=user_id,
+                user_type=audit_user_scope,
                 tenant_id=sessions[0].tenant_id,
-                audit_user_scope=audit_user_scope,
-                audit_session_id=sessions[0].id,
                 new_values={"event": "logout_all", "revoked_count": len(sessions)},
-                ip_address=ip_address,
-                user_agent=user_agent,
             )
         self._db.commit()
         return len(sessions)
@@ -507,38 +516,45 @@ class SessionService:
         return self._db.scalars(stmt).first()
 
     def _user_scope_for_audit(self, user_id: str) -> str | None:
-        """``audit.audit_log.user_type`` stores ``auth.app_user.user_scope`` (not session user_type)."""
+        """``audit.audit_log.user_type`` stores ``auth.app_user.user_scope``."""
         stmt = select(User.user_scope).where(User.id == user_id).limit(1)
         return self._db.scalars(stmt).first()
 
-    def _write_audit(
-        self,
-        *,
-        action: str,
-        record_id: str,
-        user_id: str | None,
-        tenant_id: str | None,
-        audit_user_scope: str | None = None,
-        audit_session_id: str | None = None,
-        new_values: dict | None = None,
-        old_values: dict | None = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-    ) -> None:
-        log = AuditLog(
-            id=generate_id(),
-            tenant_id=tenant_id,
-            session_id=audit_session_id,
-            user_id=user_id,
-            user_type=audit_user_scope,
-            schema_name="auth",
-            table_name="session",
-            record_id=record_id,
-            action=action,
-            old_values=json.dumps(old_values) if old_values is not None else None,
-            new_values=json.dumps(new_values) if new_values is not None else None,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            reason=None,
+    @staticmethod
+    def _source(source: AuditSource | None, *, session_id: str | None = None) -> AuditSource:
+        source = source or AuditSource()
+        if session_id is None:
+            return source
+        return AuditSource(
+            ip_address=source.ip_address,
+            user_agent=source.user_agent,
+            request_id=source.request_id,
+            session_id=session_id,
         )
-        self._db.add(log)
+
+    def _reject_login(
+        self,
+        source: AuditSource,
+        email: str,
+        *,
+        user: User | None = None,
+        tenant_id: str | None = None,
+        account_id: str | None = None,
+        reason: str | None = None,
+        message: str = _AUTH_GENERIC,
+    ) -> Never:
+        values: dict[str, str] = {"email": email}
+        if reason is not None:
+            values["reason"] = reason
+        append_audit_log(
+            self._db,
+            action="login_failed",
+            source=source,
+            user_id=user.id if user is not None else None,
+            user_type=user.user_scope if user is not None else None,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            new_values=values,
+        )
+        self._db.commit()
+        unauthorized("AUTH", message)

@@ -1,5 +1,6 @@
 """rpt domain services."""
 
+from mtf.audit.service import AuditSource
 from mtf.rpt.services.criteria_validation import criteria_to_json, validate_report_criteria
 from mtf.rpt.services.layout_validation import validate_report_layout
 from mtf.rpt.services.report_action import (
@@ -10,7 +11,7 @@ from mtf.rpt.services.report_action import (
 from mtf.rpt.services.report_catalog import ReportCatalogService, ResolvedReport
 from mtf.rpt.services.report_lookup import ReportLookupService
 from mtf.rpt.services.report_run import ReportRunService, encode_report_value
-from mtf.rpt.services.report_saved_view import AuditSource, ReportSavedViewService
+from mtf.rpt.services.report_saved_view import ReportSavedViewService
 from mtf.rpt.services.view_authorization import ReportViewAuthorizer
 
 __all__ = [

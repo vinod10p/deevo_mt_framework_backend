@@ -120,8 +120,8 @@ def test_delete_tenant_user_soft_deletes_membership_only() -> None:
     client = TestClient(app)
     r = client.delete(f"/api/tenant/{TEST_TENANT_ID}/users/{TEST_USER_ID}")
     assert r.status_code == 204
-    svc.soft_delete_for_tenant.assert_called_once_with(
-        TEST_TENANT_ID,
-        TEST_USER_ID,
-        deleted_by=TEST_SYSTEM_USER_ID,
-    )
+    args, kwargs = svc.soft_delete_for_tenant.call_args
+    assert args == (TEST_TENANT_ID, TEST_USER_ID)
+    assert kwargs["deleted_by"] == TEST_SYSTEM_USER_ID
+    assert kwargs["actor"].user_id == TEST_SYSTEM_USER_ID
+    assert kwargs["source"].request_id is not None

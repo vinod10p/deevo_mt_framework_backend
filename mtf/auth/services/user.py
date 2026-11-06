@@ -8,8 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from mtf.audit.service import AuditSource, audit_insert, audit_update, row_snapshot
 from mtf.auth.models import User
 from mtf.auth.schemas import UserCreate, UserUpdate
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import hash_password
 
@@ -41,7 +43,13 @@ class UserService:
         stmt = select(User).where(User.email == normalized, User.is_deleted == False)  # noqa: E712
         return self._db.scalars(stmt).first()
 
-    def create_user(self, data: UserCreate) -> User:
+    def create_user(
+        self,
+        data: UserCreate,
+        *,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
+    ) -> User:
         normalized = str(data.email).strip().lower()
         existing = self.get_by_email(normalized)
         if existing:
@@ -68,6 +76,14 @@ class UserService:
             user.password_hash = hash_password(data.password)
             user.password_changed_at = now
         self._db.add(user)
+        audit_insert(
+            self._db,
+            entity=user,
+            schema_name="auth",
+            table_name="app_user",
+            actor=actor,
+            source=source,
+        )
         self._db.commit()
         self._db.refresh(user)
         return user
@@ -78,6 +94,8 @@ class UserService:
         data: UserUpdate,
         *,
         updated_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> User:
         user = self.get_user(user_id)
         if user is None:
@@ -87,6 +105,7 @@ class UserService:
             row_version_conflict("USER")
 
         now = _utc_naive_now()
+        before = row_snapshot(user)
         updates = data.model_dump(exclude_none=True, exclude={"row_version", "password"})
         if "email" in updates:
             updates["email"] = str(updates["email"]).strip().lower()
@@ -106,6 +125,15 @@ class UserService:
             user.updated_by = updated_by
 
         self._db.add(user)
+        audit_update(
+            self._db,
+            entity=user,
+            schema_name="auth",
+            table_name="app_user",
+            before=before,
+            actor=actor,
+            source=source,
+        )
         self._db.commit()
         self._db.refresh(user)
         return user

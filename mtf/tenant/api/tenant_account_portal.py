@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.services.tenant_account_user import TenantAccountUserService
 from mtf.shared.deps import (
@@ -75,6 +77,7 @@ def create_account_portal_user(
     tenant_id: str = Depends(get_tenant_id_portal),
     account_id: str = Depends(get_account_id),
     current_user: CurrentUser = Depends(require_account_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     return service.create_for_account(
@@ -82,6 +85,8 @@ def create_account_portal_user(
         account_id,
         payload,
         created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -92,6 +97,7 @@ def update_account_portal_user(
     tenant_id: str = Depends(get_tenant_id_portal),
     account_id: str = Depends(get_account_id),
     current_user: CurrentUser = Depends(require_scope("tenant_account")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> TenantAccountUserRead:
     membership = service.get_membership(tenant_id, account_id, current_user.user_id)
@@ -106,6 +112,8 @@ def update_account_portal_user(
         payload,
         updated_by=current_user.user_id,
         actor_membership=membership if current_user.user_id == user_id else None,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -115,6 +123,7 @@ def delete_account_portal_user(
     tenant_id: str = Depends(get_tenant_id_portal),
     account_id: str = Depends(get_account_id),
     current_user: CurrentUser = Depends(require_account_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantAccountUserService = Depends(get_tenant_account_user_service),
 ) -> Response:
     service.soft_delete_for_account(
@@ -122,5 +131,7 @@ def delete_account_portal_user(
         account_id,
         user_id,
         deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

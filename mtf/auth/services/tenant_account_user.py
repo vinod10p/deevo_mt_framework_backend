@@ -9,9 +9,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from mtf.audit.service import (
+    AuditSource,
+    audit_insert,
+    audit_soft_delete,
+    audit_update,
+    row_snapshot,
+)
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.user import User
 from mtf.shared.db_integrity import is_unique_constraint_violation
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
 from mtf.shared.security import generate_id, hash_password
 from mtf.tenant.models import TenantAccount
@@ -198,6 +206,8 @@ class TenantAccountUserService:
         data: Any,
         *,
         created_by: str | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> dict[str, Any]:
         self._require_account(tenant_id, account_id)
 
@@ -212,6 +222,7 @@ class TenantAccountUserService:
             if self._existing_membership(tenant_id, account_id, existing.id) is not None:
                 conflict("TENANT_ACCOUNT_USER", "User is already a member of this account")
             user = existing
+            before_user = row_snapshot(user)
             if data.first_name is not None:
                 user.first_name = data.first_name
             if data.last_name is not None:
@@ -226,6 +237,17 @@ class TenantAccountUserService:
             user.updated_by = created_by
             user.updated_at = now
             self._db.add(user)
+            audit_update(
+                self._db,
+                entity=user,
+                schema_name="auth",
+                table_name="app_user",
+                before=before_user,
+                actor=actor,
+                source=source,
+                tenant_id=tenant_id,
+                account_id=account_id,
+            )
         else:
             if not password:
                 bad_request("USER", "Password is required for new users")
@@ -244,6 +266,16 @@ class TenantAccountUserService:
             )
             self._db.add(user)
             self._db.flush()
+            audit_insert(
+                self._db,
+                entity=user,
+                schema_name="auth",
+                table_name="app_user",
+                actor=actor,
+                source=source,
+                tenant_id=tenant_id,
+                account_id=account_id,
+            )
 
         row = TenantAccountUser(
             id=generate_id(),
@@ -256,6 +288,16 @@ class TenantAccountUserService:
             updated_by=created_by,
         )
         self._db.add(row)
+        audit_insert(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_account_user",
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         try:
             self._db.commit()
         except IntegrityError as exc:
@@ -276,6 +318,8 @@ class TenantAccountUserService:
         *,
         updated_by: str | None = None,
         actor_membership: TenantAccountUser | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> dict[str, Any]:
         row = self._membership(tenant_id, account_id, user_id)
         if row is None:
@@ -293,6 +337,10 @@ class TenantAccountUserService:
                 if data.role is not None or data.is_active is not None:
                     conflict("TENANT_ACCOUNT_USER", "Cannot change your own role or status")
 
+        now = _utc_naive_now()
+        before_row = row_snapshot(row)
+        before_user = row_snapshot(user)
+
         if data.role is not None and data.role != row.role:
             if row.role == "admin" and self._count_active_admins(
                 tenant_id, account_id, exclude_user_id=user_id
@@ -306,7 +354,6 @@ class TenantAccountUserService:
                     conflict("TENANT_ACCOUNT_USER", "Cannot deactivate the last admin")
             row.is_active = data.is_active
 
-        now = _utc_naive_now()
         if data.first_name is not None:
             user.first_name = data.first_name
         if data.last_name is not None:
@@ -327,6 +374,28 @@ class TenantAccountUserService:
 
         self._db.add(row)
         self._db.add(user)
+        audit_update(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_account_user",
+            before=before_row,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
+        audit_update(
+            self._db,
+            entity=user,
+            schema_name="auth",
+            table_name="app_user",
+            before=before_user,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         self._db.refresh(user)
@@ -340,6 +409,8 @@ class TenantAccountUserService:
         *,
         deleted_by: str | None = None,
         row_version: bytes | None = None,
+        actor: CurrentUser | None = None,
+        source: AuditSource | None = None,
     ) -> TenantAccountUser:
         row = self._membership(tenant_id, account_id, user_id)
         if row is None:
@@ -353,6 +424,7 @@ class TenantAccountUserService:
         ) == 0:
             conflict("TENANT_ACCOUNT_USER", "Cannot remove the last admin from the account")
 
+        before = row_snapshot(row)
         row.is_active = False
         row.is_deleted = True
         row.deleted_by = deleted_by
@@ -361,6 +433,17 @@ class TenantAccountUserService:
             row.updated_by = deleted_by
 
         self._db.add(row)
+        audit_soft_delete(
+            self._db,
+            entity=row,
+            schema_name="auth",
+            table_name="tenant_account_user",
+            before=before,
+            actor=actor,
+            source=source,
+            tenant_id=tenant_id,
+            account_id=account_id,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row

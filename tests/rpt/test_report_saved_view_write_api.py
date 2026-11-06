@@ -73,6 +73,8 @@ def test_create_201_passes_body_and_audit_source() -> None:
     assert args[2].criteria == {"status": "active"} and args[2].is_default is True
     assert isinstance(kwargs["source"], AuditSource)
     assert kwargs["source"].user_agent == "pytest-agent"
+    assert kwargs["source"].request_id is not None
+    assert len(kwargs["source"].request_id) == 26
 
 
 def test_create_defaults_criteria_and_layout_to_empty() -> None:

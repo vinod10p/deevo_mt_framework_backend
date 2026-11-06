@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from mtf.audit.api.deps import get_audit_source
+from mtf.audit.service import AuditSource
 from mtf.auth.services import TenantUserService
 from mtf.shared.deps import (
     CurrentUser,
@@ -65,10 +67,17 @@ def create_tenant_staff(
     payload: TenantUserCreate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> TenantUserRead:
     service.assert_can_manage_users(tenant_id, current_user.user_id)
-    return service.create_for_tenant(tenant_id, payload, created_by=current_user.user_id)
+    return service.create_for_tenant(
+        tenant_id,
+        payload,
+        created_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
 
 
 @router.patch("/users/{user_id}", response_model=TenantUserRead)
@@ -77,6 +86,7 @@ def update_tenant_staff(
     payload: TenantUserUpdate,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_scope("tenant")),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> TenantUserRead:
     actor = service.get_membership(tenant_id, current_user.user_id)
@@ -92,6 +102,8 @@ def update_tenant_staff(
             payload,
             updated_by=current_user.user_id,
             actor_membership=actor,
+            actor=current_user,
+            source=source,
         )
 
     service.assert_can_manage_users(tenant_id, current_user.user_id)
@@ -100,6 +112,8 @@ def update_tenant_staff(
         user_id,
         payload,
         updated_by=current_user.user_id,
+        actor=current_user,
+        source=source,
     )
 
 
@@ -108,8 +122,15 @@ def delete_tenant_staff(
     user_id: str,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_owner_or_admin),
+    source: AuditSource = Depends(get_audit_source),
     service: TenantUserService = Depends(get_tenant_user_service),
 ) -> Response:
     service.assert_can_manage_users(tenant_id, current_user.user_id)
-    service.soft_delete_for_tenant(tenant_id, user_id, deleted_by=current_user.user_id)
+    service.soft_delete_for_tenant(
+        tenant_id,
+        user_id,
+        deleted_by=current_user.user_id,
+        actor=current_user,
+        source=source,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
