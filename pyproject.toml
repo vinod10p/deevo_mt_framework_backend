@@ -1,6 +1,6 @@
 [project]
 name = "deevo-mt-framework-backend"
-version = "2026.11.06"
+version = "2026.11.07"
 description = "Deevo Multi-Tenant Framework Backend"
 readme = "README.md"
 requires-python = ">=3.13"
