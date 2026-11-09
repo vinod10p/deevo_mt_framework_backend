@@ -181,6 +181,39 @@ def test_sync_keeps_assignment_when_map_is_unchanged() -> None:
     assert [row.role_id for row in _added(db, UserRole)] == [admin_role.id]
 
 
+def test_sync_only_replaces_platform_template_roles() -> None:
+    db = MagicMock()
+    db.scalars.side_effect = [
+        MagicMock(first=MagicMock(return_value=_role(code="tenant_member"))),
+        MagicMock(all=MagicMock(return_value=[])),
+    ]
+    sync_tenant_user_role(
+        db,
+        tenant_id=TEST_TENANT_ID,
+        user_id=TEST_USER_ID,
+        membership_role="member",
+        actor_id=TEST_USER_ID,
+    )
+    live_stmt = db.scalars.call_args_list[1].args[0]
+    sql = str(live_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "JOIN auth.role" in sql
+    assert "auth.role.tenant_id IS NULL" in sql
+    assert "'tenant_admin'" in sql and "'tenant_member'" in sql
+
+
+def test_revoke_does_not_filter_to_template_roles() -> None:
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = []
+    revoke_tenant_user_roles(
+        db,
+        tenant_id=TEST_TENANT_ID,
+        user_id=TEST_USER_ID,
+        actor_id=TEST_USER_ID,
+    )
+    sql = str(db.scalars.call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "JOIN auth.role" not in sql
+
+
 def test_revoke_soft_deletes_live_assignments() -> None:
     db = MagicMock()
     row = _user_role()

@@ -19,6 +19,7 @@ from mtf.auth.models.user_role import UserRole
 from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
+from mtf.shared.security import generate_id
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
 
 pytestmark = pytest.mark.integration
@@ -200,6 +201,109 @@ def test_tenant_membership_dual_write_and_resolver(
         assert deleted.status_code == 204, deleted.text
         assert _live_role_code(tenant_id, user_id) is None
     finally:
+        if tenant_id is not None:
+            client.delete(f"/api/tenant/{tenant_id}")
+        if user_id is not None:
+            _cleanup_user(user_id)
+
+
+def _live_role_codes(tenant_id: str, user_id: str) -> set[str]:
+    with SessionLocal() as db:
+        return set(
+            db.scalars(
+                select(Role.code)
+                .join(UserRole, UserRole.role_id == Role.id)
+                .where(
+                    UserRole.tenant_id == tenant_id,
+                    UserRole.user_id == user_id,
+                    UserRole.account_id.is_(None),
+                    UserRole.is_deleted == False,  # noqa: E712
+                )
+            ).all()
+        )
+
+
+def test_membership_update_keeps_custom_role(
+    client: TestClient,
+    rbac_ready: None,
+) -> None:
+    tenant_id: str | None = None
+    user_id: str | None = None
+    custom_role_id = generate_id()
+    try:
+        created = client.post(
+            "/api/tenant/",
+            json={"name": "RBAC Custom Keep", "subdomain": _unique("rbac-keep")},
+        )
+        assert created.status_code == 201, created.text
+        tenant_id = created.json()["id"]
+
+        member = client.post(
+            f"/api/tenant/{tenant_id}/users",
+            json={
+                "email": f"{_unique('rbac-keep')}@example.com",
+                "password": "Secret123!",
+                "role": "member",
+            },
+        )
+        assert member.status_code == 201, member.text
+        user_id = member.json()["user_id"]
+
+        with SessionLocal() as db:
+            db.add(
+                Role(
+                    id=custom_role_id,
+                    tenant_id=tenant_id,
+                    code="support_lead",
+                    name="Support Lead",
+                    user_scope="tenant",
+                    is_system=False,
+                    created_by=SEEDED_SYSTEM_USER_ID,
+                    updated_by=SEEDED_SYSTEM_USER_ID,
+                )
+            )
+            db.flush()
+            db.add(
+                UserRole(
+                    id=generate_id(),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role_id=custom_role_id,
+                    user_scope="tenant",
+                    created_by=SEEDED_SYSTEM_USER_ID,
+                    updated_by=SEEDED_SYSTEM_USER_ID,
+                )
+            )
+            db.commit()
+        assert _live_role_codes(tenant_id, user_id) == {"tenant_member", "support_lead"}
+
+        renamed = client.patch(
+            f"/api/tenant/{tenant_id}/users/{user_id}",
+            json={"row_version": member.json()["row_version"], "first_name": "Renamed"},
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert _live_role_codes(tenant_id, user_id) == {"tenant_member", "support_lead"}
+
+        promoted = client.patch(
+            f"/api/tenant/{tenant_id}/users/{user_id}",
+            json={"row_version": renamed.json()["row_version"], "role": "admin"},
+        )
+        assert promoted.status_code == 200, promoted.text
+        assert _live_role_codes(tenant_id, user_id) == {"tenant_admin", "support_lead"}
+
+        deleted = client.delete(f"/api/tenant/{tenant_id}/users/{user_id}")
+        assert deleted.status_code == 204, deleted.text
+        assert _live_role_codes(tenant_id, user_id) == set()
+    finally:
+        with SessionLocal() as db:
+            role = db.get(Role, custom_role_id)
+            if role is not None and not role.is_deleted:
+                role.is_active = False
+                role.is_deleted = True
+                role.deleted_at = func.sysutcdatetime()
+                role.deleted_by = SEEDED_SYSTEM_USER_ID
+                db.add(role)
+                db.commit()
         if tenant_id is not None:
             client.delete(f"/api/tenant/{tenant_id}")
         if user_id is not None:

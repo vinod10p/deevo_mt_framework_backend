@@ -126,6 +126,11 @@ class TenantRoleService:
         row = require_tenant_owned_role(self._db, tenant_id, role_id)
         if row.row_version != data.row_version:
             row_version_conflict("AUTH_ROLE")
+        deactivating = data.is_active is False and row.is_active
+        if deactivating and ADMIN_PERMISSION_CODE in permission_codes_for_role(
+            self._db, row.id
+        ):
+            assert_not_last_admin(self._db, tenant_id, drop_role_id=row.id)
 
         before = row_snapshot(row)
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})

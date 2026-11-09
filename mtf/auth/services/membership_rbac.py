@@ -3,6 +3,10 @@
 ``tenant_user.role`` / ``tenant_account_user.role`` stay master until RBAC owns
 the gates. Every membership write must call these helpers in the same
 transaction. Missing platform template roles fail the write.
+
+Sync only swaps the platform template role for the membership string; custom
+roles assigned through the RBAC API are left alone. Revoke (membership removed)
+still soft-deletes every assignment in that place.
 """
 
 from __future__ import annotations
@@ -271,26 +275,40 @@ def _place_filters(
     return filters
 
 
+def _template_codes(user_scope: str) -> frozenset[str]:
+    if user_scope == "tenant":
+        return frozenset(TENANT_MEMBERSHIP_ROLE_MAP.values())
+    return frozenset(ACCOUNT_MEMBERSHIP_ROLE_MAP.values())
+
+
 def _live_assignments(
     db: Session,
     *,
     tenant_id: str,
     user_id: str,
     account_id: str | None,
+    templates_for_scope: str | None = None,
 ) -> list[UserRole]:
-    return _orm_rows(
-        db.scalars(
-            select(UserRole).where(
-                *_place_filters(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    account_id=account_id,
-                ),
-                UserRole.is_deleted == False,  # noqa: E712
-            )
+    """Live assignments in one place.
+
+    With ``templates_for_scope``, only platform template roles that dual-write
+    owns are returned, so custom roles assigned through the RBAC API survive.
+    """
+    stmt = select(UserRole).where(
+        *_place_filters(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            account_id=account_id,
         ),
-        UserRole,
+        UserRole.is_deleted == False,  # noqa: E712
     )
+    if templates_for_scope is not None:
+        stmt = stmt.join(Role, Role.id == UserRole.role_id).where(
+            Role.tenant_id.is_(None),
+            Role.user_scope == templates_for_scope,
+            Role.code.in_(sorted(_template_codes(templates_for_scope))),
+        )
+    return _orm_rows(db.scalars(stmt), UserRole)
 
 
 def _sync_assignment(
@@ -313,6 +331,7 @@ def _sync_assignment(
         tenant_id=tenant_id,
         user_id=user_id,
         account_id=account_id,
+        templates_for_scope=user_scope,
     )
     keep: UserRole | None = None
     for row in live:

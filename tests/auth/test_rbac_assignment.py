@@ -14,7 +14,7 @@ from mtf.auth.models.role import Role
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user import User
 from mtf.auth.models.user_role import UserRole
-from mtf.auth.schemas.role import TenantRoleCreate
+from mtf.auth.schemas.role import RoleUpdate, TenantRoleCreate
 from mtf.auth.schemas.role_permission import RolePermissionCreate
 from mtf.auth.schemas.user_role import UserRoleCreate
 from mtf.auth.services.rbac_assignment import (
@@ -172,6 +172,61 @@ def test_create_tenant_role_is_not_system() -> None:
     assert role.is_system is False
     [log] = _added(db, AuditLog)
     assert (log.action, log.table_name, log.tenant_id) == ("insert", "role", TEST_TENANT_ID)
+
+
+def _codes(*codes: str) -> MagicMock:
+    result = MagicMock()
+    result.all.return_value = list(codes)
+    return result
+
+
+def test_deactivate_last_admin_role_is_409() -> None:
+    db = MagicMock()
+    db.scalars.side_effect = [_first(_role()), _codes(ADMIN_PERMISSION_CODE)]
+    db.execute.return_value.all.return_value = [(TEST_USER_ID, _ROLE_ID)]
+    svc = TenantRoleService(db)
+    with pytest.raises(HTTPException) as exc_info:
+        svc.update(
+            TEST_TENANT_ID,
+            _ROLE_ID,
+            RoleUpdate(row_version=_ROW_VER, is_active=False),
+            updated_by=TEST_USER_ID,
+            actor=ACTOR,
+        )
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "AUTH_ROLE_CONFLICT"
+    db.commit.assert_not_called()
+
+
+def test_deactivate_admin_role_allowed_when_other_admin_remains() -> None:
+    db = MagicMock()
+    db.scalars.side_effect = [_first(_role()), _codes(ADMIN_PERMISSION_CODE)]
+    db.execute.return_value.all.return_value = [
+        (TEST_USER_ID, _ROLE_ID),
+        ("01OTHER000000000000000000", _ADMIN_ROLE_ID),
+    ]
+    row = TenantRoleService(db).update(
+        TEST_TENANT_ID,
+        _ROLE_ID,
+        RoleUpdate(row_version=_ROW_VER, is_active=False),
+        updated_by=TEST_USER_ID,
+        actor=ACTOR,
+    )
+    assert row.is_active is False
+    db.commit.assert_called_once()
+
+
+def test_rename_admin_role_skips_last_admin_check() -> None:
+    db = MagicMock()
+    db.scalars.side_effect = [_first(_role())]
+    TenantRoleService(db).update(
+        TEST_TENANT_ID,
+        _ROLE_ID,
+        RoleUpdate(row_version=_ROW_VER, name="Renamed"),
+        updated_by=TEST_USER_ID,
+        actor=ACTOR,
+    )
+    db.execute.assert_not_called()
 
 
 def test_grant_permission_escalation() -> None:
