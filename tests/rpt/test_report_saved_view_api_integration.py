@@ -152,10 +152,10 @@ def test_member_sees_own_view_and_cannot_edit_tenant_view(setup: dict) -> None:
     }
 
 
-def test_other_tenant_sees_only_system_view(setup: dict) -> None:
-    ids = setup["ids"]
-    views = _mine(_as("01HZYJZGXM0KV0K4T8Y9ABCDE9", setup["owner_id"]).get(LIST_URL).json(), ids)
-    assert [v["id"] for v in views] == [ids["system"]]
+def test_other_tenant_cannot_list_views_for_hidden_report(setup: dict) -> None:
+    r = _as("01HZYJZGXM0KV0K4T8Y9ABCDE9", setup["owner_id"]).get(LIST_URL)
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "REPORT_NOT_FOUND"
 
 
 def test_default_resolution_user_then_tenant_then_system(setup: dict) -> None:

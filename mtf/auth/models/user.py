@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.mssql import ROWVERSION
@@ -24,7 +25,10 @@ class User(Base):
     """Application login identity — table `auth.app_user`."""
 
     __tablename__ = "app_user"
-    __table_args__ = {"schema": "auth"}
+    __table_args__ = (
+        UniqueConstraint("id", "user_scope", name="UQ_app_user_id_user_scope"),
+        {"schema": "auth"},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
 

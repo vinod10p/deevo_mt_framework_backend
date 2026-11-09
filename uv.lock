@@ -264,7 +264,7 @@ wheels = [
 
 [[package]]
 name = "deevo-mt-framework-backend"
-version = "2026.11.6"
+version = "2026.11.7"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

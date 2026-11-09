@@ -41,7 +41,7 @@ app.include_router(mtf_rpt_router, prefix="/api/v1")
 app.include_router(mtf_txn_router, prefix="/api/v1")
 ```
 
-4. Seed `rpt.*` and `txn.*` for each report and screen. Implement entity GET/POST/PATCH/DELETE yourself; gate writes with `require_screen_permission("your_screen_key", "view"|"add"|"edit"|"delete")`.
+4. Seed `rpt.*` and `txn.*` for each report and screen. Implement entity GET/POST/PATCH/DELETE yourself; gate writes with `require_screen_permission("your_screen_key", "view"|"add"|"edit"|"delete")`. If the tenant has RBAC grants for that screen, the helper checks `screen.{key}.{action}` only; otherwise it falls back to `txn.screen_permission`.
 
 Sample system reports: [docs/rpt_seed_sample_report.sql](docs/rpt_seed_sample_report.sql).
 

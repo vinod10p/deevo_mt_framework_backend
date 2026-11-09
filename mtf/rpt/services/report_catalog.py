@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.rpt.models import (
     ReportAction,
     ReportActionParam,
@@ -25,6 +26,7 @@ from mtf.rpt.schemas import (
     ReportDetailRead,
     ReportSummaryRead,
 )
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import not_found
 from mtf.txn.models import Screen
 from mtf.txn.services.screen_permission import ScreenOperation, ScreenPermissionService
@@ -44,21 +46,41 @@ def _is_live(model: type[Any]):
     return and_(model.is_deleted == False, model.is_active == True)  # noqa: E712
 
 
+_UNSET = object()
+
+
 class ReportCatalogService:
     """Resolves which reports a tenant can see and serves their metadata.
 
     ``_resolve_report`` is the single place that maps ``report_key`` to a report for a
     tenant; the execution engine and saved-view services must reuse it.
+
+    Tenant and portal callers are filtered by ``auth.role_report`` (``can_view``).
+    Hidden reports are omitted from the list and look like unknown keys (404).
+    System users keep the unfiltered catalog rules; they do not read tenant grants.
     """
 
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        user: CurrentUser | None = None,
+        resolver: PermissionResolver | None = None,
+    ) -> None:
         self._db = db
+        self._user = user
+        self._resolver = resolver
+        self._viewable_ids: object = _UNSET
 
     def list_reports(self, tenant_id: str) -> list[ReportSummaryRead]:
         """All system reports plus the tenant's own — not paginated.
 
         A tenant report hides a system report with the same ``report_key``.
+        Tenant/portal callers only see reports with ``role_report.can_view``.
         """
+        viewable = self._viewable_report_ids()
+        if viewable is not None and not viewable:
+            return []
         override = aliased(ReportDefinition)
         has_tenant_override = exists().where(
             override.scope_type == "tenant",
@@ -66,21 +88,24 @@ class ReportCatalogService:
             override.report_key == ReportDefinition.report_key,
             _is_live(override),
         )
+        filters = [
+            _is_live(ReportDefinition),
+            or_(
+                and_(
+                    ReportDefinition.scope_type == "tenant",
+                    ReportDefinition.tenant_id == tenant_id,
+                ),
+                and_(
+                    ReportDefinition.scope_type == "system",
+                    ~has_tenant_override,
+                ),
+            ),
+        ]
+        if viewable is not None:
+            filters.append(ReportDefinition.id.in_(viewable))
         stmt = (
             select(ReportDefinition)
-            .where(
-                _is_live(ReportDefinition),
-                or_(
-                    and_(
-                        ReportDefinition.scope_type == "tenant",
-                        ReportDefinition.tenant_id == tenant_id,
-                    ),
-                    and_(
-                        ReportDefinition.scope_type == "system",
-                        ~has_tenant_override,
-                    ),
-                ),
-            )
+            .where(*filters)
             .order_by(ReportDefinition.display_name, ReportDefinition.report_key)
         )
         return [ReportSummaryRead.model_validate(r) for r in self._db.scalars(stmt).all()]
@@ -147,8 +172,36 @@ class ReportCatalogService:
             not_found("REPORT_LOOKUP", "Lookup not found")
         return criteria
 
+    def _viewable_report_ids(self) -> frozenset[str] | None:
+        """Report ids the caller may view, or ``None`` to skip RBAC filtering."""
+        if self._viewable_ids is not _UNSET:
+            return self._viewable_ids  # type: ignore[return-value]
+        if self._user is None or self._user.user_scope == "system":
+            self._viewable_ids = None
+            return None
+        resolver = self._resolver or PermissionResolver(self._db)
+        self._resolver = resolver
+        self._viewable_ids = frozenset(
+            grant.report_id
+            for grant in resolver.report_grants(self._user).values()
+            if grant.can_view
+        )
+        return self._viewable_ids
+
+    def _hide_unauthorized(self, report: ReportDefinition) -> ReportDefinition:
+        viewable = self._viewable_report_ids()
+        if viewable is not None and report.id not in viewable:
+            not_found("REPORT", "Report not found")
+        return report
+
     def _resolve_report(self, tenant_id: str, report_key: str) -> ReportDefinition:
-        """Tenant-owned report wins over a system report with the same key; otherwise 404."""
+        """Tenant-owned report wins over a system report with the same key; otherwise 404.
+
+        Unauthorized (no ``can_view`` grant) is the same 404 as unknown.
+        """
+        viewable = self._viewable_report_ids()
+        if viewable is not None and not viewable:
+            not_found("REPORT", "Report not found")
         tenant_stmt = (
             select(ReportDefinition)
             .where(
@@ -161,7 +214,7 @@ class ReportCatalogService:
         )
         report = self._db.scalars(tenant_stmt).first()
         if report is not None:
-            return report
+            return self._hide_unauthorized(report)
 
         system_stmt = (
             select(ReportDefinition)
@@ -175,7 +228,7 @@ class ReportCatalogService:
         report = self._db.scalars(system_stmt).first()
         if report is None:
             not_found("REPORT", "Report not found")
-        return report
+        return self._hide_unauthorized(report)
 
     def _list_columns(self, report_id: str) -> list[ReportColumn]:
         stmt = (

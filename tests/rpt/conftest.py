@@ -61,6 +61,57 @@ def portal_user() -> CurrentUser:
     )
 
 
+def live_tenant_staff(*, tenant_id: str | None = None) -> CurrentUser:
+    """JWT identity for a live ``tenant_user`` row (needs backfilled ``user_role``)."""
+    from sqlalchemy import select
+
+    from mtf.auth.models.tenant_user import TenantUser
+    from mtf.shared.database import SessionLocal
+
+    with SessionLocal() as db:
+        filters = [
+            TenantUser.is_deleted == False,  # noqa: E712
+            TenantUser.is_active == True,  # noqa: E712
+        ]
+        if tenant_id is not None:
+            filters.append(TenantUser.tenant_id == tenant_id)
+        row = db.scalars(select(TenantUser).where(*filters).limit(1)).first()
+    if row is None:
+        pytest.skip("no live tenant_user row")
+    return CurrentUser(
+        user_id=row.user_id,
+        user_type="app_user",
+        user_scope="tenant",
+        tenant_id=row.tenant_id,
+    )
+
+
+def live_portal_user(*, tenant_id: str | None = None) -> CurrentUser:
+    """JWT identity for a live ``tenant_account_user`` row."""
+    from sqlalchemy import select
+
+    from mtf.auth.models.tenant_account_user import TenantAccountUser
+    from mtf.shared.database import SessionLocal
+
+    with SessionLocal() as db:
+        filters = [
+            TenantAccountUser.is_deleted == False,  # noqa: E712
+            TenantAccountUser.is_active == True,  # noqa: E712
+        ]
+        if tenant_id is not None:
+            filters.append(TenantAccountUser.tenant_id == tenant_id)
+        row = db.scalars(select(TenantAccountUser).where(*filters).limit(1)).first()
+    if row is None:
+        pytest.skip("no live tenant_account_user row")
+    return CurrentUser(
+        user_id=row.user_id,
+        user_type="app_user",
+        user_scope="tenant_account",
+        tenant_id=row.tenant_id,
+        account_id=row.account_id,
+    )
+
+
 def system_user() -> CurrentUser:
     return CurrentUser(
         user_id=TEST_USER_ID,

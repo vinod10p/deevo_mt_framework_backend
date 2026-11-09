@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import configure_mappers
 
-from mtf.rpt.models import ReportAction, ReportActionParam, ReportDefinition, ReportPermission
+from mtf.rpt.models import ReportAction, ReportActionParam, ReportDefinition
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -22,12 +22,6 @@ def test_report_definition_has_permission_mode() -> None:
     col = ReportDefinition.__table__.c.permission_mode
     assert col.nullable is False
     assert col.server_default is not None
-
-
-def test_report_permission_table() -> None:
-    assert ReportPermission.__table__.schema == "rpt"
-    names = set(ReportPermission.__mapper__.columns.keys())
-    assert {"tenant_id", "user_id", "report_id", "can_access", "deleted_at"}.issubset(names)
 
 
 def _fk_targets(model: type) -> set[tuple[str, str]]:

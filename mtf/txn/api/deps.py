@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from mtf.shared.deps import CurrentUser, get_current_user, get_db
+from mtf.auth.services.permission_resolver import PermissionResolver
+from mtf.shared.deps import CurrentUser, get_current_user, get_db, get_permission_resolver
 from mtf.shared.exceptions import forbidden
+from mtf.txn.services.screen_access import ScreenAccessService
 from mtf.txn.services.screen_permission import (
     ScreenEffectivePermissions,
     ScreenOperation,
     ScreenPermissionService,
 )
+
+#: ``request.state`` attribute for the per-request :class:`ScreenAccessService`.
+SCREEN_ACCESS_STATE = "screen_access"
 
 _screen_permission_checkers: dict[
     tuple[str, ScreenOperation],
@@ -34,11 +39,30 @@ def get_screen_permission_service(
     return ScreenPermissionService(db)
 
 
+def get_screen_access_service(
+    request: Request,
+    db: Session = Depends(get_db),
+    resolver: PermissionResolver = Depends(get_permission_resolver),
+    legacy: ScreenPermissionService = Depends(get_screen_permission_service),
+) -> ScreenAccessService:
+    """One access service per request so RBAC detection is queried once."""
+    existing = getattr(request.state, SCREEN_ACCESS_STATE, None)
+    if isinstance(existing, ScreenAccessService):
+        return existing
+    service = ScreenAccessService(db, resolver=resolver, legacy=legacy)
+    setattr(request.state, SCREEN_ACCESS_STATE, service)
+    return service
+
+
 def require_screen_permission(
     screen_key: str,
     operation: ScreenOperation,
 ) -> Callable[..., ScreenEffectivePermissions]:
     """Enforce one screen operation. ``screen_key`` is a product constant (e.g. ``"lead"``).
+
+    If the tenant has RBAC grants for this screen, check ``screen.{key}.{action}``
+    only (``403 AUTH_FORBIDDEN``). Otherwise fall back to ``txn.screen_permission``
+    (``403 SCREEN_FORBIDDEN``). Not both-must-pass.
 
     Does not check ``user_scope`` — the product route adds ``require_scope`` if needed.
     Tenant comes from the JWT; a missing tenant is ``AUTH_FORBIDDEN``.
@@ -49,15 +73,9 @@ def require_screen_permission(
 
     def checker(
         user: CurrentUser = Depends(get_screen_caller),
-        service: ScreenPermissionService = Depends(get_screen_permission_service),
+        access: ScreenAccessService = Depends(get_screen_access_service),
     ) -> ScreenEffectivePermissions:
-        tenant_id = user.tenant_id
-        if tenant_id is None:
-            forbidden("AUTH", "Tenant context required")
-        perms = service.resolve(tenant_id, user.user_id, screen_key)
-        if not perms.allows(operation):
-            forbidden("SCREEN", "Insufficient permissions")
-        return perms
+        return access.require(user, screen_key, operation)
 
     _screen_permission_checkers[(screen_key, operation)] = checker
     return checker

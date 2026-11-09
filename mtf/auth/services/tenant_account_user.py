@@ -18,6 +18,10 @@ from mtf.audit.service import (
 )
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.user import User
+from mtf.auth.services.membership_rbac import (
+    revoke_account_user_roles,
+    sync_account_user_role,
+)
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
@@ -298,6 +302,17 @@ class TenantAccountUserService:
             tenant_id=tenant_id,
             account_id=account_id,
         )
+        sync_account_user_role(
+            self._db,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            user_id=user.id,
+            membership_role=row.role,
+            is_active=row.is_active is not False,
+            actor_id=created_by,
+            actor=actor,
+            source=source,
+        )
         try:
             self._db.commit()
         except IntegrityError as exc:
@@ -396,6 +411,17 @@ class TenantAccountUserService:
             tenant_id=tenant_id,
             account_id=account_id,
         )
+        sync_account_user_role(
+            self._db,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            user_id=user_id,
+            membership_role=row.role,
+            is_active=row.is_active is not False,
+            actor_id=updated_by,
+            actor=actor,
+            source=source,
+        )
         self._db.commit()
         self._db.refresh(row)
         self._db.refresh(user)
@@ -443,6 +469,15 @@ class TenantAccountUserService:
             source=source,
             tenant_id=tenant_id,
             account_id=account_id,
+        )
+        revoke_account_user_roles(
+            self._db,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            user_id=user_id,
+            actor_id=deleted_by,
+            actor=actor,
+            source=source,
         )
         self._db.commit()
         self._db.refresh(row)

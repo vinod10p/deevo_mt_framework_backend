@@ -12,7 +12,7 @@ from mtf.auth.api.app_user import get_user_service
 from mtf.auth.api.session import get_user_service as get_me_user_service
 from mtf.auth.models.user import User
 from main import app
-from mtf.shared.deps import CurrentUser, get_current_user
+from mtf.shared.deps import CurrentUser, get_current_user, get_permission_resolver
 
 from tests.tenant.conftest import TEST_SYSTEM_USER_ID
 
@@ -63,12 +63,21 @@ def _minimal_user(**kwargs: object) -> User:
     return User(**base)  # type: ignore[arg-type]
 
 
+def _empty_permission_resolver() -> MagicMock:
+    resolver = MagicMock()
+    resolver.permission_codes.return_value = frozenset()
+    resolver.report_grants.return_value = {}
+    return resolver
+
+
 @pytest.fixture(autouse=True)
 def stub_system_user_for_auth_api_tests(
     request: pytest.FixtureRequest,
 ) -> None:
+    app.dependency_overrides[get_permission_resolver] = _empty_permission_resolver
     if request.function.__name__ in _DENYLIST:
         yield
+        app.dependency_overrides.pop(get_permission_resolver, None)
         return
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         user_id=TEST_SYSTEM_USER_ID,
@@ -78,6 +87,7 @@ def stub_system_user_for_auth_api_tests(
     )
     yield
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_permission_resolver, None)
 
 
 def test_users_routes_require_bearer() -> None:
@@ -159,6 +169,8 @@ def test_get_me_returns_user() -> None:
     body = r.json()
     assert body["id"] == TEST_SYSTEM_USER_ID
     assert body["user_scope"] == "system"
+    assert body["permissions"] == []
+    assert body["reports"] == []
     svc.get_user.assert_called_once_with(TEST_SYSTEM_USER_ID)
 
 

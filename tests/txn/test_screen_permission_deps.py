@@ -8,7 +8,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from mtf.shared.deps import get_current_user
-from mtf.txn.api.deps import get_screen_permission_service, require_screen_permission
+from mtf.shared.exceptions import forbidden
+from mtf.txn.api.deps import get_screen_access_service, require_screen_permission
 from mtf.txn.services.screen_permission import ScreenEffectivePermissions
 from tests.txn.conftest import SAMPLE_SCREEN_KEY, system_user, tenant_user
 
@@ -56,10 +57,16 @@ def _probe_app() -> FastAPI:
 
 def _client(perms: ScreenEffectivePermissions, user=None) -> TestClient:
     app = _probe_app()
-    svc = MagicMock()
-    svc.resolve.return_value = perms
+    access = MagicMock()
+
+    def require(_user, _key, operation):
+        if not perms.allows(operation):
+            forbidden("SCREEN", "Insufficient permissions")
+        return perms
+
+    access.require.side_effect = require
     app.dependency_overrides[get_current_user] = lambda: user or tenant_user()
-    app.dependency_overrides[get_screen_permission_service] = lambda: svc
+    app.dependency_overrides[get_screen_access_service] = lambda: access
     return TestClient(app)
 
 

@@ -27,6 +27,17 @@ def test_openapi_lists_auth_user_routes() -> None:
     assert "/api/auth/users" in paths
     assert "/api/auth/users/{user_id}" in paths
     assert "patch" in paths["/api/auth/users/{user_id}"]
+    assert "/api/auth/permissions" in paths
+    assert "/api/auth/permissions/{permission_id}" in paths
+    assert "/api/auth/roles" in paths
+    assert "/api/auth/roles/{role_id}" in paths
+    assert "/api/auth/roles/{role_id}/permissions" in paths
+    assert "/api/auth/roles/{role_id}/default-reports" in paths
+    assert "/api/tenant/roles" in paths
+    assert "/api/tenant/roles/{role_id}" in paths
+    assert "/api/tenant/roles/{role_id}/permissions" in paths
+    assert "/api/tenant/roles/{role_id}/reports" in paths
+    assert "/api/tenant/users/{user_id}/roles" in paths
 
 
 def test_auth_operations_tagged() -> None:

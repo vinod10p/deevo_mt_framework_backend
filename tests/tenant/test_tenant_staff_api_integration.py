@@ -156,6 +156,12 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         assert me_body["tenant_id"] == tenant_id
         assert me_body["role"] == "owner"
         assert me_body["email"] == ctx["owner_email"]
+        assert "screen.lead.view" in me_body["permissions"]
+        assert "api.auth.role.update" in me_body["permissions"]
+        assert any(
+            row["report_key"] == "tenant_account_list" and row["can_export"] is True
+            for row in me_body["reports"]
+        )
 
         tenant_me = client.get("/api/tenant/me", headers=headers)
         assert tenant_me.status_code == 200, tenant_me.text
@@ -234,7 +240,14 @@ def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
         )
         member_me = client.get("/api/auth/me", headers=member_headers)
         assert member_me.status_code == 200, member_me.text
-        assert member_me.json()["role"] == "member"
+        member_body = member_me.json()
+        assert member_body["role"] == "member"
+        assert "screen.lead.view" in member_body["permissions"]
+        assert "api.auth.role.update" not in member_body["permissions"]
+        assert any(
+            row["report_key"] == "tenant_account_list" and row["can_export"] is False
+            for row in member_body["reports"]
+        )
 
     finally:
         app.dependency_overrides[get_current_user] = lambda: CurrentUser(

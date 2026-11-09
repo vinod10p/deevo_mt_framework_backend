@@ -13,7 +13,7 @@ from mtf.auth.api.session import (
 )
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from main import app
-from mtf.shared.deps import CurrentUser, get_current_user
+from mtf.shared.deps import CurrentUser, get_current_user, get_permission_resolver
 
 from tests.auth.test_system_auth_api import _minimal_user
 from tests.tenant.conftest import (
@@ -53,9 +53,13 @@ def test_me_tenant_account_returns_account_context() -> None:
         tenant_id=TEST_TENANT_ID,
         account_id=TEST_ACCOUNT_ID,
     )
+    resolver = MagicMock()
+    resolver.permission_codes.return_value = frozenset()
+    resolver.report_grants.return_value = {}
     app.dependency_overrides[get_user_service] = lambda: user_svc
     app.dependency_overrides[get_tenant_account_user_service] = lambda: account_user_svc
     app.dependency_overrides[get_tenant_account_service_for_me] = lambda: account_svc
+    app.dependency_overrides[get_permission_resolver] = lambda: resolver
 
     client = TestClient(app)
     r = client.get("/api/auth/me")
@@ -67,3 +71,5 @@ def test_me_tenant_account_returns_account_context() -> None:
     assert body["account_name"] == "Acme Corp"
     assert body["account_code"] == "A001"
     assert body["role"] == "admin"
+    assert body["permissions"] == []
+    assert body["reports"] == []

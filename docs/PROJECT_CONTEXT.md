@@ -62,6 +62,16 @@ Update statuses as work progresses.
 | 19 | `txn/` Screen metadata API `GET /api/screens/{screen_key}` | ✅ Done |
 | 20 | `rpt/` embed `actions[]` on `GET /api/reports/{report_key}` | ✅ Done |
 | 21 | `rpt/` `POST /api/reports/{report_key}/actions/{action_key}/resolve` | ✅ Done |
+| 22 | RBAC v3 — models + constraint tests ([sql/rbac_development_steps.md](../sql/rbac_development_steps.md) step 1) | ✅ Done |
+| 23 | RBAC v3 — `PermissionResolver` + `require_permission` (step 2) | ✅ Done |
+| 24 | RBAC v3 — idempotent seed `sql/auth_rbac_seed_v3.sql` (step 3) | ✅ Done |
+| 25 | RBAC v3 — backfill existing tenants `sql/auth_rbac_backfill_v3.sql` (step 4) | ✅ Done |
+| 26 | RBAC v3 — onboarding + dual-write on membership APIs (step 5) | ✅ Done |
+| 27 | RBAC v3 — report catalog/run enforce `role_report` (step 6) | ✅ Done |
+| 28 | RBAC v3 — `GET /api/auth/me` returns grants (step 7) | ✅ Done |
+| 29 | RBAC v3 — system catalog CRUD (step 8) | ✅ Done |
+| 30 | RBAC v3 — tenant assignment CRUD (step 9) | ✅ Done |
+| 31 | RBAC v3 — screen gates prefer RBAC, else `screen_permission` (step 10) | ✅ Done |
 
 ---
 
@@ -72,10 +82,10 @@ Update statuses as work progresses.
 | Python module | SQL schema | Tables |
 |---------------|-----------|--------|
 | `mtf/shared` | — | config, database, security, deps, exceptions, schemas |
-| `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
+| `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user`, `permission`, `role`, `role_permission`, `user_role`, `role_report`, `default_role_report` (DDL: [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql)) |
 | `mtf/tenant` | `tenant` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
-| `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_permission`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
+| `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
 | `mtf/txn` | `txn` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` — generic transaction-screen metadata only (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)) |
 
 ### Out of Scope
@@ -92,8 +102,8 @@ Products may share the same SQL Server instance but must never write to
 | Prefix | Domain | Notes |
 |--------|--------|--------|
 | `GET /health` | — | No auth; load balancers |
-| `/api/auth` | `mtf.auth` | login, refresh, users, memberships |
-| `/api/tenant` | `mtf.tenant` | tenants, accounts, settings, addresses |
+| `/api/auth` | `mtf.auth` | login, refresh, users, memberships, RBAC catalog |
+| `/api/tenant` | `mtf.tenant` | tenants, accounts, settings, addresses, RBAC assignments |
 | `/api/account` | `mtf.tenant` (portal) | account self-service — users menu (`tenant_account` scope) |
 | `/api/audit` | `mtf.audit` | read/create audit log (append-only) |
 | `/api/reports` | `mtf.rpt` | report catalog metadata (`tenant` + `tenant_account` scope) |

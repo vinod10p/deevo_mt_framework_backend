@@ -1,4 +1,4 @@
-"""SQLAlchemy model — `rpt.report_permission`."""
+"""SQLAlchemy model — `auth.role_report`."""
 
 from __future__ import annotations
 
@@ -14,11 +14,16 @@ from mtf.shared.database import Base
 _DT_UTC = DateTime(timezone=False)
 
 
-class ReportPermission(Base):
-    """Per-user report access for one tenant. Not wired to V1 endpoints yet."""
+class RoleReport(Base):
+    """Per-tenant report grant for a role — table ``auth.role_report``.
 
-    __tablename__ = "report_permission"
-    __table_args__ = {"schema": "rpt"}
+    Every row belongs to a tenant. Platform defaults are copied in from
+    ``auth.default_role_report`` at onboarding, not read at runtime.
+    ``can_export`` requires ``can_view`` (``CK_role_report_export_needs_view``).
+    """
+
+    __tablename__ = "role_report"
+    __table_args__ = {"schema": "auth"}
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(
@@ -26,9 +31,9 @@ class ReportPermission(Base):
         ForeignKey("tenant.tenant.id"),
         nullable=False,
     )
-    user_id: Mapped[str] = mapped_column(
+    role_id: Mapped[str] = mapped_column(
         String(26),
-        ForeignKey("auth.app_user.id"),
+        ForeignKey("auth.role.id"),
         nullable=False,
     )
     report_id: Mapped[str] = mapped_column(
@@ -36,7 +41,8 @@ class ReportPermission(Base):
         ForeignKey("rpt.report_definition.id"),
         nullable=False,
     )
-    can_access: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
+    can_view: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
+    can_export: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
@@ -72,3 +78,9 @@ class ReportPermission(Base):
         ForeignKey("auth.app_user.id"),
         nullable=True,
     )
+
+    def __repr__(self) -> str:
+        return (
+            f"<RoleReport id={self.id!r} tenant_id={self.tenant_id!r} "
+            f"role_id={self.role_id!r} report_id={self.report_id!r}>"
+        )

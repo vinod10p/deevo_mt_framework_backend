@@ -18,7 +18,7 @@ from mtf.rpt.models import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
 from mtf.tenant.models import TenantAccount
-from tests.rpt.conftest import OTHER_TENANT_ID, portal_user, tenant_user
+from tests.rpt.conftest import OTHER_TENANT_ID, live_portal_user, live_tenant_staff, tenant_user
 
 pytestmark = pytest.mark.integration
 
@@ -50,7 +50,9 @@ def tenant_id() -> str:
 
 @pytest.fixture
 def client(tenant_id: str) -> TestClient:
-    app.dependency_overrides[get_current_user] = lambda: tenant_user(tenant_id)
+    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff(
+        tenant_id=tenant_id
+    )
     return TestClient(app)
 
 
@@ -94,12 +96,12 @@ def test_tenant_scoped_lookup_round_trip(client: TestClient) -> None:
 def test_tenant_scoped_lookup_isolated_per_tenant() -> None:
     app.dependency_overrides[get_current_user] = lambda: tenant_user(OTHER_TENANT_ID)
     r = TestClient(app).get(ACCOUNT_URL)
-    assert r.status_code == 200
-    assert r.json() == {"items": [], "has_more": False}
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "REPORT_NOT_FOUND"
 
 
 def test_portal_user_can_use_lookups(tenant_id: str) -> None:
-    user = portal_user()
+    user = live_portal_user(tenant_id=tenant_id)
     app.dependency_overrides[get_current_user] = lambda: user
     assert TestClient(app).get(ROLE_URL).status_code == 200
 

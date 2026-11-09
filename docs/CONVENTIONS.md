@@ -159,7 +159,7 @@ deevo_mt_framework_backend/
 
 | Module | SQL Schema | Purpose |
 |--------|-----------|---------|
-| `auth` | `auth` | Users, sessions, tenant-user and tenant-account-user membership |
+| `auth` | `auth` | Users, sessions, membership, and RBAC v3 (roles, permissions, report grants) |
 | `tenant` | `tenant` | Tenants, accounts, addresses, settings |
 | `audit` | `audit` | Immutable audit log for all data changes and auth events |
 | `rpt` | `rpt` | Generic report catalog (definitions, columns, criteria, saved views) and execution |
@@ -186,10 +186,10 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 
 | SQL Schema | Owner | Tables |
 |-----------|-------|--------|
-| `auth` | `deevo_mt_framework_backend` | `app_user`, `session`, `tenant_user`, `tenant_account_user` |
+| `auth` | `deevo_mt_framework_backend` | `app_user`, `session`, `tenant_user`, `tenant_account_user`, `permission`, `role`, `role_permission`, `user_role`, `role_report`, `default_role_report` (RBAC DDL: [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql)) |
 | `tenant` | `deevo_mt_framework_backend` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `audit` | `deevo_mt_framework_backend` | `audit_log` (DDL: [../sql/audit_schema_v2.sql](../sql/audit_schema_v2.sql); v1 dump still in [../sql/database_schema_v1.sql](../sql/database_schema_v1.sql)) |
-| `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view`, `report_permission`, `report_action`, `report_action_param` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql), additive V2 in [txn_schema_v2.sql](txn_schema_v2.sql)) |
+| `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql), additive V2 in [txn_schema_v2.sql](txn_schema_v2.sql)). Per-user `report_permission` was dropped by RBAC v3. |
 | `txn` | `deevo_mt_framework_backend` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)). Metadata only — entity CRUD stays in product backends. |
 | `crm` | `deevo_crm_backend` / `deevoflow_backend` | leads, contacts, accounts, deals, activities |
 
@@ -473,9 +473,28 @@ Every `auth.app_user` has a `user_scope` that determines which application they 
 - `get_current_user` (in `mtf/shared/deps.py`) decodes the token and returns `TokenContext` including `user_scope`.
 - Services must **never** trust `tenant_id` from the request body — always use value from the authenticated token context.
 
-### RBAC (v1)
+### RBAC (v3)
 
-v1 authorisation is **scope-based only** via `require_scope(...)` on endpoints (`system`, `tenant`, `tenant_account`). Fine-grained roles/permissions tables are **not** in v1 — add a dedicated RBAC section here when introduced.
+JWT scope (`require_scope`) still gates which application the caller is in. Fine-grained grants live in `auth.permission`, `auth.role`, `auth.role_permission`, `auth.user_role`, `auth.role_report`, and `auth.default_role_report`.
+
+- DDL: [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql)
+- Design: [../sql/rbac_database_design.md](../sql/rbac_database_design.md)
+- Coding order: [../sql/rbac_development_steps.md](../sql/rbac_development_steps.md)
+
+Rules while this is rolling out:
+
+- Permission codes are **not** stored in the JWT. `PermissionResolver` loads them per request and memoizes on that request only (`request.state` + instance cache).
+- Gate catalog codes with `Depends(require_permission("screen.lead.view"))`. Missing grant → `403 AUTH_FORBIDDEN`. JWT scope is still a separate `require_scope` check.
+- Seed: [../sql/auth_rbac_seed_v3.sql](../sql/auth_rbac_seed_v3.sql). Role-admin permission is `api.auth.role.update` (tenant) / `api.system.role.update` (system).
+- Backfill existing tenants: [../sql/auth_rbac_backfill_v3.sql](../sql/auth_rbac_backfill_v3.sql) (also the later “apply defaults to all tenants” script).
+- `tenant_user.role` / `tenant_account_user.role` remains master until RBAC owns the gates; every write dual-updates `user_role` (`mtf/auth/services/membership_rbac.py`).
+- `TenantService.create_tenant` copies live `default_role_report` rows into `role_report` for the new tenant in the same transaction. Missing platform template roles fail the membership write.
+- System users have no membership row. They resolve `user_role` with null `tenant_id` / `account_id`. They cannot call tenant endpoints in v1.
+- Hidden reports: catalog omits them; GET-by-id, lookups, and `/run` return 404, not 403. Tenant/portal callers are filtered by `role_report.can_view`. System users keep the unfiltered catalog rules. Saved-view *management* still uses `tenant_user.role` until a follow-up.
+- `GET /api/auth/me` returns `permissions` (sorted codes) and `reports` (`report_key`, `can_view`, `can_export`) for the UI. They are not stored in the JWT or `TokenResponse`. The backend still authorizes with `PermissionResolver`.
+- System catalog CRUD (`/api/auth/permissions`, `/api/auth/roles`, nested grants) is gated with `require_scope("system")` until those routes move to `api.system.role.update`. Platform roles always have `tenant_id` NULL and `is_system` true. `default_role_report` accepts only tenant/account template roles and platform-wide reports. Permission `code` is composed as `resource_type.resource_code.action`.
+- Tenant assignment CRUD (`/api/tenant/roles`, nested permissions/reports, `/api/tenant/users/{user_id}/roles`) is gated with JWT tenant scope + owner/admin membership until those routes move to `api.auth.role.update`. Tenants cannot edit platform (`is_system`) roles. Escalation: the actor cannot grant a permission or report access they do not hold. Last-admin: revoking the last holder of `api.auth.role.update` is `409`; the check locks `user_role` with `UPDLOCK, HOLDLOCK`.
+- Product screens keep calling `require_screen_permission(screen_key, operation)`. If the tenant has RBAC grants for that screen (catalog `screen.{key}.*` plus live `user_role`), the helper checks `screen.{key}.{action}` only (`add`→`create`, `edit`→`update`) and returns `403 AUTH_FORBIDDEN`. Otherwise it falls back to `txn.screen_permission` (`403 SCREEN_FORBIDDEN`). Not both-must-pass. `GET /api/screens/{screen_key}` uses the same branch for the permissions object.
 
 ---
 
@@ -504,6 +523,9 @@ current_user: TokenContext = Depends(get_current_user)
 # Enforce scope
 _: TokenContext = Depends(require_scope("system"))
 _: TokenContext = Depends(require_scope("tenant", "system"))
+
+# Enforce a catalog permission (request-scoped resolver)
+_: CurrentUser = Depends(require_permission("screen.lead.view"))
 
 # Pagination
 pagination: PaginationParams = Depends(get_pagination)

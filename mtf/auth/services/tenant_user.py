@@ -19,6 +19,10 @@ from mtf.audit.service import (
 )
 from mtf.auth.models import TenantUser, User
 from mtf.auth.schemas.tenant_user import TenantMembershipCreate, TenantMembershipUpdate
+from mtf.auth.services.membership_rbac import (
+    revoke_tenant_user_roles,
+    sync_tenant_user_role,
+)
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
@@ -298,6 +302,16 @@ class TenantUserService:
             source=source,
             tenant_id=tenant_id,
         )
+        sync_tenant_user_role(
+            self._db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            membership_role=row.role,
+            is_active=row.is_active is not False,
+            actor_id=created_by,
+            actor=actor,
+            source=source,
+        )
         try:
             self._db.commit()
         except IntegrityError as exc:
@@ -392,6 +406,16 @@ class TenantUserService:
             source=source,
             tenant_id=tenant_id,
         )
+        sync_tenant_user_role(
+            self._db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            membership_role=row.role,
+            is_active=row.is_active is not False,
+            actor_id=updated_by,
+            actor=actor,
+            source=source,
+        )
         self._db.commit()
         self._db.refresh(row)
         self._db.refresh(user)
@@ -435,6 +459,14 @@ class TenantUserService:
             actor=actor,
             source=source,
             tenant_id=tenant_id,
+        )
+        revoke_tenant_user_roles(
+            self._db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor_id=deleted_by,
+            actor=actor,
+            source=source,
         )
         self._db.commit()
         self._db.refresh(row)
@@ -485,6 +517,16 @@ class TenantUserService:
             source=source,
             tenant_id=data.tenant_id,
         )
+        sync_tenant_user_role(
+            self._db,
+            tenant_id=data.tenant_id,
+            user_id=data.user_id,
+            membership_role=row.role,
+            is_active=row.is_active is not False,
+            actor_id=created_by,
+            actor=actor,
+            source=source,
+        )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -525,6 +567,26 @@ class TenantUserService:
             source=source,
             tenant_id=row.tenant_id,
         )
+        if row.is_deleted:
+            revoke_tenant_user_roles(
+                self._db,
+                tenant_id=row.tenant_id,
+                user_id=row.user_id,
+                actor_id=updated_by,
+                actor=actor,
+                source=source,
+            )
+        else:
+            sync_tenant_user_role(
+                self._db,
+                tenant_id=row.tenant_id,
+                user_id=row.user_id,
+                membership_role=row.role,
+                is_active=row.is_active is not False,
+                actor_id=updated_by,
+                actor=actor,
+                source=source,
+            )
         self._db.commit()
         self._db.refresh(row)
         return row
@@ -562,6 +624,14 @@ class TenantUserService:
             actor=actor,
             source=source,
             tenant_id=row.tenant_id,
+        )
+        revoke_tenant_user_roles(
+            self._db,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            actor_id=deleted_by,
+            actor=actor,
+            source=source,
         )
         self._db.commit()
         self._db.refresh(row)

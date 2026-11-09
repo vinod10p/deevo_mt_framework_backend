@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
+from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.rpt.api.deps import (
     get_audit_source,
     get_report_connection,
@@ -33,29 +34,45 @@ from mtf.rpt.services import (
     ReportRunService,
     ReportSavedViewService,
 )
-from mtf.shared.deps import CurrentUser, get_db
+from mtf.shared.deps import CurrentUser, get_db, get_permission_resolver
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
-def get_report_catalog_service(db: Session = Depends(get_db)) -> ReportCatalogService:
-    return ReportCatalogService(db)
+def get_report_catalog_service(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_report_user),
+    resolver: PermissionResolver = Depends(get_permission_resolver),
+) -> ReportCatalogService:
+    return ReportCatalogService(db, user=user, resolver=resolver)
 
 
-def get_report_lookup_service(db: Session = Depends(get_db)) -> ReportLookupService:
-    return ReportLookupService(db)
+def get_report_lookup_service(
+    db: Session = Depends(get_db),
+    catalog: ReportCatalogService = Depends(get_report_catalog_service),
+) -> ReportLookupService:
+    return ReportLookupService(db, catalog=catalog)
 
 
-def get_report_run_service(db: Session = Depends(get_db)) -> ReportRunService:
-    return ReportRunService(db)
+def get_report_run_service(
+    db: Session = Depends(get_db),
+    catalog: ReportCatalogService = Depends(get_report_catalog_service),
+) -> ReportRunService:
+    return ReportRunService(db, catalog=catalog)
 
 
-def get_report_saved_view_service(db: Session = Depends(get_db)) -> ReportSavedViewService:
-    return ReportSavedViewService(db)
+def get_report_saved_view_service(
+    db: Session = Depends(get_db),
+    catalog: ReportCatalogService = Depends(get_report_catalog_service),
+) -> ReportSavedViewService:
+    return ReportSavedViewService(db, catalog=catalog)
 
 
-def get_report_action_service(db: Session = Depends(get_db)) -> ReportActionService:
-    return ReportActionService(db)
+def get_report_action_service(
+    db: Session = Depends(get_db),
+    catalog: ReportCatalogService = Depends(get_report_catalog_service),
+) -> ReportActionService:
+    return ReportActionService(db, catalog=catalog)
 
 
 @router.get("", response_model=list[ReportSummaryRead])

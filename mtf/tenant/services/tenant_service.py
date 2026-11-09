@@ -15,6 +15,7 @@ from mtf.audit.service import (
     audit_update,
     row_snapshot,
 )
+from mtf.auth.services.membership_rbac import copy_default_role_reports
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
@@ -85,16 +86,24 @@ class TenantService:
             **data.model_dump(exclude_none=True),
         )
         self._db.add(tenant)
-        audit_insert(
-            self._db,
-            entity=tenant,
-            schema_name="tenant",
-            table_name="tenant",
-            actor=actor,
-            source=source,
-            tenant_id=tenant.id,
-        )
         try:
+            self._db.flush()
+            audit_insert(
+                self._db,
+                entity=tenant,
+                schema_name="tenant",
+                table_name="tenant",
+                actor=actor,
+                source=source,
+                tenant_id=tenant.id,
+            )
+            copy_default_role_reports(
+                self._db,
+                tenant_id=tenant.id,
+                created_by=created_by,
+                actor=actor,
+                source=source,
+            )
             self._db.commit()
         except IntegrityError as e:
             self._db.rollback()

@@ -147,6 +147,7 @@ def test_create_for_tenant_writes_user_and_membership() -> None:
         patch.object(svc, "_require_tenant"),
         patch.object(svc, "_get_active_user_by_email", return_value=None),
         patch("mtf.auth.services.tenant_user.hash_password", return_value="hashed"),
+        patch("mtf.auth.services.tenant_user.sync_tenant_user_role"),
     ):
         svc.create_for_tenant(
             TEST_TENANT_ID,
@@ -175,6 +176,7 @@ def test_update_for_tenant_writes_membership_and_user() -> None:
     with (
         patch.object(svc, "_membership_by_tenant_and_user", return_value=row),
         patch.object(svc, "_get_user_any", return_value=user),
+        patch("mtf.auth.services.tenant_user.sync_tenant_user_role"),
     ):
         svc.update_for_tenant(
             TEST_TENANT_ID,
@@ -197,7 +199,10 @@ def test_soft_delete_for_tenant_writes_delete() -> None:
     db = MagicMock()
     row = _membership()
     svc = TenantUserService(db)
-    with patch.object(svc, "_membership_by_tenant_and_user", return_value=row):
+    with (
+        patch.object(svc, "_membership_by_tenant_and_user", return_value=row),
+        patch("mtf.auth.services.tenant_user.revoke_tenant_user_roles"),
+    ):
         svc.soft_delete_for_tenant(
             TEST_TENANT_ID,
             TEST_USER_ID,
@@ -225,6 +230,7 @@ def test_create_for_account_writes_user_and_membership() -> None:
         patch.object(svc, "_require_account"),
         patch.object(svc, "_get_active_user_by_email", return_value=None),
         patch("mtf.auth.services.tenant_account_user.hash_password", return_value="hashed"),
+        patch("mtf.auth.services.tenant_account_user.sync_account_user_role"),
     ):
         svc.create_for_account(
             TEST_TENANT_ID,
@@ -253,6 +259,7 @@ def test_update_for_account_writes_membership_and_user() -> None:
     with (
         patch.object(svc, "_membership", return_value=row),
         patch.object(svc, "_get_user_any", return_value=user),
+        patch("mtf.auth.services.tenant_account_user.sync_account_user_role"),
     ):
         svc.update_for_account(
             TEST_TENANT_ID,
@@ -274,7 +281,10 @@ def test_soft_delete_for_account_writes_delete() -> None:
     db = MagicMock()
     row = _account_membership()
     svc = TenantAccountUserService(db)
-    with patch.object(svc, "_membership", return_value=row):
+    with (
+        patch.object(svc, "_membership", return_value=row),
+        patch("mtf.auth.services.tenant_account_user.revoke_account_user_roles"),
+    ):
         svc.soft_delete_for_account(
             TEST_TENANT_ID,
             TEST_ACCOUNT_ID,

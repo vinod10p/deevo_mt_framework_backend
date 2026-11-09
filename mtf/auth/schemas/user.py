@@ -56,6 +56,14 @@ class UserUpdate(BaseModel):
     mfa_confirmed_at: datetime | None = None
 
 
+class MeReportGrantRead(BaseModel):
+    """One report the caller may see — UI only; the backend still uses the resolver."""
+
+    report_key: str
+    can_view: bool
+    can_export: bool
+
+
 class UserMeRead(BaseModel):
     """``GET /api/auth/me`` — profile plus tenant membership when ``user_scope=tenant``."""
 
@@ -101,6 +109,9 @@ class UserMeRead(BaseModel):
     account_name: str | None = None
     account_code: str | None = None
     account_type: str | None = None
+
+    permissions: list[str] = Field(default_factory=list)
+    reports: list[MeReportGrantRead] = Field(default_factory=list)
 
 
 class UserRead(BaseModel):

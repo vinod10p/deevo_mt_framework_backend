@@ -7,6 +7,7 @@ from collections import defaultdict
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from mtf.auth.services.permission_resolver import Actor
 from mtf.shared.exceptions import forbidden
 from mtf.txn.models import (
     Lookup,
@@ -24,6 +25,7 @@ from mtf.txn.schemas.screen import (
     ScreenPermissionsRead,
     ScreenSectionRead,
 )
+from mtf.txn.services.screen_access import ScreenAccessService
 from mtf.txn.services.screen_permission import (
     ScreenEffectivePermissions,
     ScreenPermissionService,
@@ -64,19 +66,29 @@ class ScreenMetadataService:
         self,
         db: Session,
         permissions: ScreenPermissionService | None = None,
+        access: ScreenAccessService | None = None,
     ) -> None:
         self._db = db
         self._permissions = permissions or ScreenPermissionService(db)
+        self._access = access
 
     def get_screen(
         self,
         tenant_id: str,
         user_id: str,
         screen_key: str,
+        user: Actor | None = None,
     ) -> ScreenMetadataRead:
-        screen, perms = self._permissions.resolve_with_screen(tenant_id, user_id, screen_key)
+        if self._access is not None and user is not None:
+            screen, perms = self._access.resolve_with_screen(user, screen_key)
+            deny = "AUTH" if self._access.uses_rbac(tenant_id, screen_key) else "SCREEN"
+        else:
+            screen, perms = self._permissions.resolve_with_screen(
+                tenant_id, user_id, screen_key
+            )
+            deny = "SCREEN"
         if not perms.any_granted():
-            forbidden("SCREEN", "Insufficient permissions")
+            forbidden(deny, "Insufficient permissions")
         return self._build(screen, perms, tenant_id)
 
     def _build(

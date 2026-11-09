@@ -18,8 +18,15 @@ from mtf.audit.service import AuditSource
 from mtf.auth.schemas import UserMeRead
 from mtf.auth.schemas.session import LoginRequest, RefreshRequest, TokenResponse
 from mtf.auth.services import TenantAccountUserService, TenantUserService, UserService
+from mtf.auth.services.me import me_rbac_fields
+from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.auth.services.session_service import SessionService
-from mtf.shared.deps import CurrentUser, get_current_user, get_db
+from mtf.shared.deps import (
+    CurrentUser,
+    get_current_user,
+    get_db,
+    get_permission_resolver,
+)
 from mtf.shared.exceptions import forbidden, unauthorized
 
 router = APIRouter(tags=["auth"])
@@ -96,6 +103,8 @@ def get_me(
         get_tenant_account_user_service
     ),
     tenant_account_service=Depends(get_tenant_account_service_for_me),
+    resolver: PermissionResolver = Depends(get_permission_resolver),
+    db: Session = Depends(get_db),
 ) -> UserMeRead:
     """Current user profile — system, tenant staff, or portal account user."""
     if current_user.user_scope not in ("system", "tenant", "tenant_account"):
@@ -143,6 +152,8 @@ def get_me(
         account_code = account.account_code
         account_type = account.account_type
 
+    permissions, reports = me_rbac_fields(db, resolver, current_user)
+
     return UserMeRead(
         id=user.id,
         email=user.email,
@@ -175,6 +186,8 @@ def get_me(
         account_name=account_name,
         account_code=account_code,
         account_type=account_type,
+        permissions=permissions,
+        reports=reports,
     )
 
 

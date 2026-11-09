@@ -1,10 +1,12 @@
 """FastAPI dependencies — DB session and authentication."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,6 +17,12 @@ from mtf.auth.models.user import User
 from mtf.shared.database import SessionLocal
 from mtf.shared.exceptions import forbidden, unauthorized
 from mtf.shared.security import decode_token
+
+if TYPE_CHECKING:
+    from mtf.auth.services.permission_resolver import PermissionResolver
+
+#: ``request.state`` attribute for the per-request :class:`PermissionResolver`.
+PERMISSION_RESOLVER_STATE = "permission_resolver"
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +220,46 @@ def require_tenant_role(*roles: str) -> Callable[..., CurrentUser]:
         return user
 
     _tenant_role_checkers[key] = checker
+    return checker
+
+
+def get_permission_resolver(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PermissionResolver:
+    """One resolver per request: stored on ``request.state`` and memoized internally."""
+    from mtf.auth.services.permission_resolver import PermissionResolver
+
+    existing = getattr(request.state, PERMISSION_RESOLVER_STATE, None)
+    if isinstance(existing, PermissionResolver):
+        return existing
+    resolver = PermissionResolver(db)
+    setattr(request.state, PERMISSION_RESOLVER_STATE, resolver)
+    return resolver
+
+
+_permission_checkers: dict[str, Callable[..., CurrentUser]] = {}
+
+
+def require_permission(code: str) -> Callable[..., CurrentUser]:
+    """Require ``code`` in the caller's request-scoped permission set.
+
+    Does not check JWT scope — the route still adds ``require_scope`` when needed.
+    Missing grant → ``403 AUTH_FORBIDDEN``.
+    """
+    cached = _permission_checkers.get(code)
+    if cached is not None:
+        return cached
+
+    def checker(
+        user: CurrentUser = Depends(get_current_user),
+        resolver: PermissionResolver = Depends(get_permission_resolver),
+    ) -> CurrentUser:
+        if not resolver.has_permission(user, code):
+            forbidden("AUTH", "Insufficient permissions")
+        return user
+
+    _permission_checkers[code] = checker
     return checker
 
 

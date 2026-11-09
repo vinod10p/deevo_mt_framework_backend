@@ -19,8 +19,8 @@ from mtf.rpt.services.report_catalog import ReportCatalogService
 
 
 class ReportLookupService:
-    def __init__(self, db: Session) -> None:
-        self._catalog = ReportCatalogService(db)
+    def __init__(self, db: Session, *, catalog: ReportCatalogService | None = None) -> None:
+        self._catalog = catalog or ReportCatalogService(db)
 
     def get_options(
         self,

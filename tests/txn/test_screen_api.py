@@ -86,10 +86,13 @@ def test_screen_route_requires_bearer() -> None:
 
 
 def test_get_screen_uses_jwt_tenant_and_user() -> None:
-    svc = _with_user(tenant_user())
+    user = tenant_user()
+    svc = _with_user(user)
     r = TestClient(app).get(f"/api/screens/{SAMPLE_SCREEN_KEY}")
     assert r.status_code == 200
-    svc.get_screen.assert_called_once_with(TEST_TENANT_ID, TEST_USER_ID, SAMPLE_SCREEN_KEY)
+    svc.get_screen.assert_called_once_with(
+        TEST_TENANT_ID, TEST_USER_ID, SAMPLE_SCREEN_KEY, user=user
+    )
     body = r.json()
     assert body["screen_key"] == SAMPLE_SCREEN_KEY
     assert body["permissions"]["can_delete"] is False
@@ -98,10 +101,13 @@ def test_get_screen_uses_jwt_tenant_and_user() -> None:
 
 
 def test_get_screen_allows_portal_scope() -> None:
-    svc = _with_user(portal_user())
+    user = portal_user()
+    svc = _with_user(user)
     r = TestClient(app).get(f"/api/screens/{SAMPLE_SCREEN_KEY}")
     assert r.status_code == 200
-    svc.get_screen.assert_called_once_with(TEST_TENANT_ID, TEST_USER_ID, SAMPLE_SCREEN_KEY)
+    svc.get_screen.assert_called_once_with(
+        TEST_TENANT_ID, TEST_USER_ID, SAMPLE_SCREEN_KEY, user=user
+    )
 
 
 def test_get_screen_forbidden_without_tenant() -> None:
@@ -115,7 +121,7 @@ def test_get_screen_forbidden_without_tenant() -> None:
 def test_get_screen_not_found() -> None:
     svc = _with_user(tenant_user())
 
-    def _missing(*_: object) -> None:
+    def _missing(*_: object, **__: object) -> None:
         not_found("SCREEN", "Screen not found")
 
     svc.get_screen.side_effect = _missing

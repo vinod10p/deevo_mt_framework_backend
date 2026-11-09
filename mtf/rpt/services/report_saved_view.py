@@ -66,9 +66,9 @@ def _snapshot(view: ReportSavedView) -> dict[str, Any]:
 
 
 class ReportSavedViewService:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, catalog: ReportCatalogService | None = None) -> None:
         self._db = db
-        self._catalog = ReportCatalogService(db)
+        self._catalog = catalog or ReportCatalogService(db)
         self._authorizer = ReportViewAuthorizer(db)
 
     # ------------------------------------------------------------------ reads

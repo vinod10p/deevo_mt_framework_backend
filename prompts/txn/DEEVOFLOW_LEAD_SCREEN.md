@@ -9,7 +9,7 @@ Governing design (read-only, sibling repo):
 - `../deevo_mt_framework_backend/prompts/txn/Deevolight_Generic_Transaction_Screens_V2_Architecture.pdf`
 - `../deevo_mt_framework_backend/prompts/txn/Deevolight_Generic_Transaction_Screens_Backend_API_Design_FINAL.pdf`
 - `../deevo_mt_framework_backend/docs/txn_schema_v2.sql`
-- Live APIs already in MTF: `GET /api/screens/{screen_key}`, `require_screen_permission(screen_key, operation)`
+- Live APIs already in MTF: `GET /api/screens/{screen_key}`, `require_screen_permission(screen_key, operation)` (RBAC `screen.lead.*` when the tenant has grants, else `txn.screen_permission` — not both-must-pass)
 - React contract (separate frontend workspace): [TRANSACTION_FRONTEND_PROMPT.md](TRANSACTION_FRONTEND_PROMPT.md)
 
 This repo’s rules win on layering, commits, error codes, and URL prefix (`docs/CONVENTIONS.md` in `deevoflow_backend`).
@@ -44,7 +44,7 @@ Do **not**:
 
 Implement **only** the step named in the user message. After each step: files changed, APIs, tests, assumptions, pending.
 
-Keep today’s error codes: `CRM_LEAD_NOT_FOUND`, `CRM_LEAD_CONFLICT`, `SCREEN_FORBIDDEN`, `AUTH_FORBIDDEN`. New on the screen endpoints only: `CRM_LEAD_FORBIDDEN` (403, converted lead). Add `reason: "stale_version"` on concurrency 409 only if it does not break existing clients.
+Keep today’s error codes: `CRM_LEAD_NOT_FOUND`, `CRM_LEAD_CONFLICT`, `SCREEN_FORBIDDEN`, `AUTH_FORBIDDEN`. Tenants on RBAC get `AUTH_FORBIDDEN` from `require_screen_permission`; tenants still on `txn.screen_permission` get `SCREEN_FORBIDDEN`. New on the screen endpoints only: `CRM_LEAD_FORBIDDEN` (403, converted lead). Add `reason: "stale_version"` on concurrency 409 only if it does not break existing clients.
 
 ---
 
@@ -76,7 +76,7 @@ After this work, a tenant JWT can:
 
 1. `GET /api/v1/screens/lead` — MTF metadata (no DeevoFlow logic).
 2. `GET /api/v1/lookups/tenant-users?search=&page=&page_size=` and `?ids=` (plus `/lookups/crm/{category}`, `/lookups/lead-statuses`) — product lookups, reusable across screens.
-3. `POST /api/v1/crm/lead-screen` and `GET/PATCH/DELETE /api/v1/crm/lead-screen/{id}` — product CRUD in the **record envelope**, gated by `require_screen_permission("lead", …)`. The old `/api/v1/crm/leads` API is untouched.
+3. `POST /api/v1/crm/lead-screen` and `GET/PATCH/DELETE /api/v1/crm/lead-screen/{id}` — product CRUD in the **record envelope**, gated by `require_screen_permission("lead", …)`. Keep that import; MTF now prefers `screen.lead.view|create|update|delete` when the tenant has RBAC grants, and falls back to `txn.screen_permission` only when it does not. Do **not** add a second `require_permission` check. The old `/api/v1/crm/leads` API is untouched.
 
 ### Envelope (GET / POST / PATCH)
 
@@ -275,13 +275,13 @@ from mtf.txn.api import router as mtf_txn_router  # main.py only
 ```
 
 ```python
-Depends(require_screen_permission("lead", "view"))   # GET
-Depends(require_screen_permission("lead", "add"))    # POST
-Depends(require_screen_permission("lead", "edit"))   # PATCH
-Depends(require_screen_permission("lead", "delete")) # DELETE
+Depends(require_screen_permission("lead", "view"))   # GET  → screen.lead.view
+Depends(require_screen_permission("lead", "add"))    # POST → screen.lead.create
+Depends(require_screen_permission("lead", "edit"))   # PATCH → screen.lead.update
+Depends(require_screen_permission("lead", "delete")) # DELETE → screen.lead.delete
 ```
 
-Screen key `"lead"` is a **DeevoFlow constant**, not something MTF knows.
+Screen key `"lead"` is a **DeevoFlow constant**, not something MTF knows. Do not wrap these with `require_permission("screen.lead.*")` — MTF already switches to RBAC when the tenant has grants.
 
 ---
 

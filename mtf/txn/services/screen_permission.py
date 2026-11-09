@@ -100,13 +100,16 @@ class ScreenPermissionService:
         _, perms = self.resolve_with_screen(tenant_id, user_id, screen_key)
         return perms
 
+    def get_live_screen(self, screen_key: str) -> Screen:
+        return self._live_screen(screen_key)
+
     def resolve_with_screen(
         self,
         tenant_id: str,
         user_id: str,
         screen_key: str,
     ) -> tuple[Screen, ScreenEffectivePermissions]:
-        screen = self._live_screen(screen_key)
+        screen = self.get_live_screen(screen_key)
         return screen, self.resolve_for_screen(tenant_id, user_id, screen)
 
     def resolve_for_screen(

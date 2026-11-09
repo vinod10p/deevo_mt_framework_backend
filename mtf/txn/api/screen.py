@@ -6,15 +6,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from mtf.shared.deps import CurrentUser, get_db
-from mtf.txn.api.deps import get_screen_caller
+from mtf.txn.api.deps import get_screen_access_service, get_screen_caller
 from mtf.txn.schemas import ScreenMetadataRead
+from mtf.txn.services.screen_access import ScreenAccessService
 from mtf.txn.services.screen_metadata import ScreenMetadataService
 
 router = APIRouter(prefix="/screens", tags=["screens"])
 
 
-def get_screen_metadata_service(db: Session = Depends(get_db)) -> ScreenMetadataService:
-    return ScreenMetadataService(db)
+def get_screen_metadata_service(
+    db: Session = Depends(get_db),
+    access: ScreenAccessService = Depends(get_screen_access_service),
+) -> ScreenMetadataService:
+    return ScreenMetadataService(db, access=access)
 
 
 @router.get("/{screen_key}", response_model=ScreenMetadataRead)
@@ -24,4 +28,4 @@ def get_screen(
     service: ScreenMetadataService = Depends(get_screen_metadata_service),
 ) -> ScreenMetadataRead:
     assert user.tenant_id is not None
-    return service.get_screen(user.tenant_id, user.user_id, screen_key)
+    return service.get_screen(user.tenant_id, user.user_id, screen_key, user=user)
