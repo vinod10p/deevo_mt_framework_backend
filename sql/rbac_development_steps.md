@@ -2,7 +2,7 @@
 
 Nov 8, 2026 · @vinod
 
-Companion to [rbac_database_design.md](rbac_database_design.md) and [auth_rbac_schema_v3.sql](auth_rbac_schema_v3.sql). Schema design stays in those files; this file is the coding order and the rules that must not drift while we build.
+Companion to [rbac_database_design.md](rbac_database_design.md) and [auth_rbac_schema_v3.sql](auth_rbac_schema_v3.sql). Schema design stays in those files; this file is the coding order and the rules that must not drift while we build. Remaining review items after step 10: [rbac_review_fixes.md](rbac_review_fixes.md).
 
 ## Locked decisions
 
@@ -123,3 +123,5 @@ Product routes keep `require_screen_permission(screen_key, operation)` so DeevoF
 ## Later
 
 `menu.*` permissions, drop membership.role, drop `txn.screen_permission`, service-account `app_user` for automated deletes, optional system support impersonation.
+
+Code-review leftovers (last-admin vs inactive membership, backfill `is_active`, report escalation, portal report grants, tenant-owned report first grant, export helpers, fail-closed report services): [rbac_review_fixes.md](rbac_review_fixes.md).

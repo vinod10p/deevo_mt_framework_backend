@@ -2,7 +2,7 @@
 
 Nov 8, 2026 · @vinod
 
-Six tables in the `auth` schema decide what each user can do on screens and reports: users get roles, roles bundle permissions, and anything not granted is denied. The script is [`auth_rbac_schema_v3.sql`](auth_rbac_schema_v3.sql); it builds on the existing `app_user`, `tenant_user` and `tenant_account_user` tables and replaces the unused `rpt.report_permission`. Coding order: [`rbac_development_steps.md`](rbac_development_steps.md).
+Six tables in the `auth` schema decide what each user can do on screens and reports: users get roles, roles bundle permissions, and anything not granted is denied. The script is [`auth_rbac_schema_v3.sql`](auth_rbac_schema_v3.sql); it builds on the existing `app_user`, `tenant_user` and `tenant_account_user` tables and replaces the unused `rpt.report_permission`. Coding order: [`rbac_development_steps.md`](rbac_development_steps.md). Remaining review items after step 10: [`rbac_review_fixes.md`](rbac_review_fixes.md).
 
 ## At a glance
 
