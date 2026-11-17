@@ -14,10 +14,10 @@ For **project identity, current build step, and scope**, see [PROJECT_CONTEXT.md
 |-------|------|
 | **IDs** | ULID as `VARCHAR(26)`; generate in services |
 | **Table names** | Singular (`tenant`, `app_user`); login identity is **`auth.app_user`**, not `auth.user` |
-| **SQL schemas (this repo)** | `auth`, `tenant`, `audit`, `rpt`, `txn` |
+| **SQL schemas (this repo)** | `auth`, `tenant`, `audit`, `rpt`, `txn`, `nav` |
 | **Soft delete** | `is_deleted` + `deleted_by`; never hard-delete mutable rows |
 | **Queries** | Filter `is_deleted = False` unless intentionally listing deleted rows |
-| **Layering** | `api/` → `services/` → models/DB; `audit` flat; `auth` / `tenant` / `rpt` split |
+| **Layering** | `api/` → `services/` → models/DB; `audit` flat; `auth` / `tenant` / `rpt` / `nav` split |
 | **API routers** | One module per entity; `api/__init__.py` exports composed `router` |
 | **HTTP prefix** | `/api/<domain>/...`; health at `GET /health` (no auth) |
 | **Errors** | `{"code": "DOMAIN_ENTITY_REASON", "message": "..."}` — stable codes |
@@ -39,7 +39,7 @@ Products (e.g. `deevo_crm_backend`) run as separate services and share the same 
 
 - **Database:** Microsoft **SQL Server 2022 or later** (2025 Standard Edition in production)
 - **DB access (v1):** Synchronous SQLAlchemy `Session` + **pyodbc** only — no async engine in v1
-- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant`, `rpt`, `txn` (framework-owned). Product schemas (`crm`, `email`, `scout`, `flow`) are owned by their respective product backends.
+- **Logical namespaces:** Tables grouped under SQL Server schemas: `audit`, `auth`, `tenant`, `rpt`, `txn`, `nav` (framework-owned). Product schemas (`crm`, `email`, `scout`, `flow`) are owned by their respective product backends.
 - **Python ORM:** SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`, `mapped_column`). Validation/serialisation: Pydantic v2 (`BaseModel`, `ConfigDict`).
 - **Package manager:** `uv`. Use `uv add <package>` to add dependencies.
 
@@ -163,6 +163,7 @@ deevo_mt_framework_backend/
 | `tenant` | `tenant` | Tenants, accounts, addresses, settings |
 | `audit` | `audit` | Immutable audit log for all data changes and auth events |
 | `rpt` | `rpt` | Generic report catalog (definitions, columns, criteria, saved views) and execution |
+| `nav` | `nav` | Platform menu catalog (modules + submenu items); JWT scope filters, no tenant overrides |
 | `shared` | — | Config, database, security, deps, exceptions, schemas |
 
 ---
@@ -191,6 +192,7 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 | `audit` | `deevo_mt_framework_backend` | `audit_log` (DDL: [../sql/audit_schema_v2.sql](../sql/audit_schema_v2.sql); v1 dump still in [../sql/database_schema_v1.sql](../sql/database_schema_v1.sql)) |
 | `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql), additive V2 in [txn_schema_v2.sql](txn_schema_v2.sql)). Per-user `report_permission` was dropped by RBAC v3. |
 | `txn` | `deevo_mt_framework_backend` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)). Metadata only — entity CRUD stays in product backends. |
+| `nav` | `deevo_mt_framework_backend` | `menu_module`, `menu_item` (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)). Platform-owned; tenants cannot change the catalog. |
 | `crm` | `deevo_crm_backend` / `deevoflow_backend` | leads, contacts, accounts, deals, activities |
 
 ### Database Users
@@ -219,6 +221,7 @@ app.include_router(tenant_router, prefix="/api/tenant")
 app.include_router(audit_router,  prefix="/api/audit")
 app.include_router(rpt_router,    prefix="/api")   # entity routers carry /reports
 app.include_router(txn_router,    prefix="/api")   # entity routers carry /screens
+app.include_router(nav_router,    prefix="/api")   # entity routers carry /nav
 ```
 
 ---
@@ -237,7 +240,7 @@ Client → mtf/<domain>/api/<entity>.py → mtf/<domain>/services/<entity>.py �
 ### Layout Rules
 
 - `audit` uses **flat layout**: `models.py`, `schemas.py`, `service.py` at domain root. HTTP under `api/`.
-- All other domains (`auth`, `tenant`, `rpt`, `txn`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
+- All other domains (`auth`, `tenant`, `rpt`, `txn`, `nav`) use **split layout**: `models/`, `schemas/`, `services/` subpackages.
 - Never keep both `models.py` and `models/` under the same domain — Python resolves one `models` name only.
 
 ---
@@ -696,7 +699,7 @@ DEEVO_ALLOWED_ORIGINS=["http://localhost:3000","http://localhost:3001","http://l
 
 For **`deevo_mt_framework_backend`**, table DDL is **owned and applied in SQL Server Management Studio**, not via Alembic in this repo.
 
-- Create/alter tables in schemas `auth`, `tenant`, `audit`, `rpt`, `txn` using **`deevo_ddl`** (or equivalent DDL login). Canonical DDL: [../sql/database_schema_v1.sql](../sql/database_schema_v1.sql) for `auth`/`tenant`, [../sql/audit_schema_v2.sql](../sql/audit_schema_v2.sql) for `audit.audit_log`, [../sql/rpt_schema_v5.sql](../sql/rpt_schema_v5.sql) for `rpt`, [../sql/txn_schema_v2.sql](../sql/txn_schema_v2.sql) for `txn` (and V2 report permission/action tables).
+- Create/alter tables in schemas `auth`, `tenant`, `audit`, `rpt`, `txn`, `nav` using **`deevo_ddl`** (or equivalent DDL login). Canonical DDL: [../sql/database_schema_v1.sql](../sql/database_schema_v1.sql) for `auth`/`tenant`, [../sql/audit_schema_v2.sql](../sql/audit_schema_v2.sql) for `audit.audit_log`, [../sql/rpt_schema_v5.sql](../sql/rpt_schema_v5.sql) for `rpt`, [../sql/txn_schema_v2.sql](../sql/txn_schema_v2.sql) for `txn` (and V2 report permission/action tables), [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql) for `nav`.
 - SQLAlchemy models in `mtf/**/models` must match the live database — update models when SSMS schema changes.
 - Keep a change script in source control (e.g. `docs/sql/` or your team’s script folder) if you want history; the app does not run DDL.
 - Product schemas (`crm`, etc.) are managed by their own backends.

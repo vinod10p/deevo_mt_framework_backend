@@ -17,6 +17,7 @@ This repository is the framework, not a CRM. Product backends such as DeevoFlow 
 | Audit | `mtf.audit` | `/api/audit` |
 | Reports | `mtf.rpt` | `/api/reports` — catalog, lookups, `/run`, saved views, actions + resolve |
 | Screens | `mtf.txn` | `/api/screens/{screen_key}` — metadata only; `require_screen_permission()` for product routes |
+| Nav | `mtf.nav` | `/api/nav/modules`, `/api/nav/modules/{module_code}/items` — JWT-scoped menu catalog |
 
 Tenant identity always comes from the JWT, never from the client body. Public (no Bearer): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refresh`. Interactive API docs: `http://localhost:8000/docs` when the server is running.
 

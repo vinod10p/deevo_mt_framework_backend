@@ -38,6 +38,8 @@ def test_openapi_lists_auth_user_routes() -> None:
     assert "/api/tenant/roles/{role_id}/permissions" in paths
     assert "/api/tenant/roles/{role_id}/reports" in paths
     assert "/api/tenant/users/{user_id}/roles" in paths
+    assert "/api/nav/modules" in paths
+    assert "/api/nav/modules/{module_code}/items" in paths
 
 
 def test_auth_operations_tagged() -> None:

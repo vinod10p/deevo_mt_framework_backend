@@ -72,6 +72,7 @@ Update statuses as work progresses.
 | 29 | RBAC v3 — system catalog CRUD (step 8) | ✅ Done |
 | 30 | RBAC v3 — tenant assignment CRUD (step 9) | ✅ Done |
 | 31 | RBAC v3 — screen gates prefer RBAC, else `screen_permission` (step 10) | ✅ Done |
+| 32 | `nav/` — `GET /api/nav/modules` and `GET /api/nav/modules/{module_code}/items` | ✅ Done |
 
 ---
 
@@ -87,13 +88,14 @@ Update statuses as work progresses.
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
 | `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
 | `mtf/txn` | `txn` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` — generic transaction-screen metadata only (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)) |
+| `mtf/nav` | `nav` | `menu_module`, `menu_item` — platform menu catalog (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)) |
 
 ### Out of Scope
 
 Product domains are **not** implemented here — `crm`, `email`, `scout`, `flow`, and entity CRUD (Lead, Customer, …). Those belong to product backends such as `deevoflow_backend`. Products seed `txn.screen` rows and implement entity APIs; they must not add generic metadata services here.
 
 Products may share the same SQL Server instance but must never write to
-`auth.*`, `tenant.*`, `audit.*`, `rpt.*`, or `txn.*` tables directly (only via this API, or documented seed scripts).
+`auth.*`, `tenant.*`, `audit.*`, `rpt.*`, `txn.*`, or `nav.*` tables directly (only via this API, or documented seed scripts).
 
 ---
 
@@ -108,6 +110,7 @@ Products may share the same SQL Server instance but must never write to
 | `/api/audit` | `mtf.audit` | read/create audit log (append-only) |
 | `/api/reports` | `mtf.rpt` | report catalog metadata (`tenant` + `tenant_account` scope) |
 | `/api/screens` | `mtf.txn` | generic screen metadata (`GET /{screen_key}`; JWT tenant required) |
+| `/api/nav` | `mtf.nav` | menu catalog (`GET /modules`, `GET /modules/{module_code}/items`; JWT scope filter) |
 
 Public (no Bearer token): `GET /health`, `POST /api/auth/login`, `POST /api/auth/refresh`.
 
@@ -160,6 +163,9 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) | Generic reporting framework design (`rpt`) |
 | [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL (V2 additions are in txn_schema_v2.sql) |
 | [txn_schema_v2.sql](txn_schema_v2.sql) | Canonical `txn` table DDL + report permission/action tables |
+| [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql) | Canonical `nav` table DDL (`menu_module`, `menu_item`) |
+| [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql) | Tenant CRM / WF / EMAIL menu rows (lookup reports by key; skip missing) |
+| [../prompts/nav/NAV_FRONTEND_PROMPT.md](../prompts/nav/NAV_FRONTEND_PROMPT.md) | React shell contract — copy into the frontend repo / Cursor chat |
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
 | [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |
