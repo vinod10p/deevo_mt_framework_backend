@@ -88,7 +88,7 @@ Update statuses as work progresses.
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
 | `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
 | `mtf/txn` | `txn` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` — generic transaction-screen metadata only (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)) |
-| `mtf/nav` | `nav` | `menu_module`, `menu_item` — platform menu catalog (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)) |
+| `mtf/nav` | `nav` | `menu_module`, `screen` (SPA routes, not `txn.screen`), `menu_item` — platform menu catalog (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)) |
 
 ### Out of Scope
 

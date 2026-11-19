@@ -2,9 +2,12 @@
 nav_menu_seed_v1.sql
 Tenant-scope nav catalog: CRM, WF, EMAIL.
 
-Apply in SSMS as deevo_ddl (or deevo_app) AFTER nav_menu_schema_v1.sql.
-Safe to re-run: insert only when the live (user_scope, code) / (module_id, code)
-pair is missing. IDs are literals (prefix 01JNAVMTF).
+Apply in SSMS as deevo_ddl (or deevo_app) AFTER nav_menu_schema_v1.sql
+(recreate). Safe to re-run: insert only when the live (user_scope, code) /
+(module_id, code) pair is missing. IDs are literals (prefix 01JNAVMTF).
+
+menu_item.user_scope must match the module (composite FK). screen_id is omitted
+on these rows (reports/groups only). Do not seed nav.screen.code = 'lead'.
 
 Report items look up rpt.report_definition by report_key (system, live).
 Missing keys are skipped so the seed still runs before product reports exist.
@@ -125,9 +128,9 @@ AND NOT EXISTS (
     WHERE module_id = @CRM AND code = 'CRM.LEADS' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000001', @CRM, NULL, 'CRM.LEADS', 'report',
+        ('01JNAVMTFME000000000000001', @CRM, 'tenant', NULL, 'CRM.LEADS', 'report',
          N'Leads', 'users', @R_LEAD, 10);
 
 IF @R_ACCOUNT IS NOT NULL
@@ -136,9 +139,9 @@ AND NOT EXISTS (
     WHERE module_id = @CRM AND code = 'CRM.ACCOUNTS' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000002', @CRM, NULL, 'CRM.ACCOUNTS', 'report',
+        ('01JNAVMTFME000000000000002', @CRM, 'tenant', NULL, 'CRM.ACCOUNTS', 'report',
          N'Accounts', 'building', @R_ACCOUNT, 20);
 
 IF @R_CONTACT IS NOT NULL
@@ -147,9 +150,9 @@ AND NOT EXISTS (
     WHERE module_id = @CRM AND code = 'CRM.CONTACTS' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000003', @CRM, NULL, 'CRM.CONTACTS', 'report',
+        ('01JNAVMTFME000000000000003', @CRM, 'tenant', NULL, 'CRM.CONTACTS', 'report',
          N'Contacts', 'contact', @R_CONTACT, 30);
 
 IF @R_OPP IS NOT NULL
@@ -158,9 +161,9 @@ AND NOT EXISTS (
     WHERE module_id = @CRM AND code = 'CRM.OPPORTUNITIES' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000004', @CRM, NULL, 'CRM.OPPORTUNITIES', 'report',
+        ('01JNAVMTFME000000000000004', @CRM, 'tenant', NULL, 'CRM.OPPORTUNITIES', 'report',
          N'Opportunities', 'handshake', @R_OPP, 40);
 
 IF @R_TASK IS NOT NULL
@@ -169,9 +172,9 @@ AND NOT EXISTS (
     WHERE module_id = @CRM AND code = 'CRM.TASKS' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000005', @CRM, NULL, 'CRM.TASKS', 'report',
+        ('01JNAVMTFME000000000000005', @CRM, 'tenant', NULL, 'CRM.TASKS', 'report',
          N'Tasks', 'checklist', @R_TASK, 50);
 
 /* -------------------------------------------------------------------------
@@ -182,9 +185,9 @@ IF NOT EXISTS (
     WHERE module_id = @WF AND code = 'WF.TASKS' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000006', @WF, NULL, 'WF.TASKS', 'group',
+        ('01JNAVMTFME000000000000006', @WF, 'tenant', NULL, 'WF.TASKS', 'group',
          N'Tasks', 'folder', NULL, 10);
 
 DECLARE @WF_TASKS varchar(26) = (
@@ -198,9 +201,9 @@ AND NOT EXISTS (
     WHERE module_id = @WF AND code = 'WF.TASKS.MINE' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000007', @WF, @WF_TASKS, 'WF.TASKS.MINE', 'report',
+        ('01JNAVMTFME000000000000007', @WF, 'tenant', @WF_TASKS, 'WF.TASKS.MINE', 'report',
          N'My tasks', 'user', @R_USER_LIST, 10);
 
 IF @R_ACCOUNT_LIST IS NOT NULL AND @WF_TASKS IS NOT NULL
@@ -209,9 +212,9 @@ AND NOT EXISTS (
     WHERE module_id = @WF AND code = 'WF.TASKS.ALL' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000008', @WF, @WF_TASKS, 'WF.TASKS.ALL', 'report',
+        ('01JNAVMTFME000000000000008', @WF, 'tenant', @WF_TASKS, 'WF.TASKS.ALL', 'report',
          N'All tasks', 'list', @R_ACCOUNT_LIST, 20);
 
 /* -------------------------------------------------------------------------
@@ -223,9 +226,9 @@ AND NOT EXISTS (
     WHERE module_id = @EMAIL AND code = 'EMAIL.INBOX' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME000000000000009', @EMAIL, NULL, 'EMAIL.INBOX', 'report',
+        ('01JNAVMTFME000000000000009', @EMAIL, 'tenant', NULL, 'EMAIL.INBOX', 'report',
          N'Inbox', 'inbox', @R_ACCOUNT_LIST, 10);
 
 IF @R_PORTAL_USER IS NOT NULL
@@ -234,9 +237,9 @@ AND NOT EXISTS (
     WHERE module_id = @EMAIL AND code = 'EMAIL.SENT' AND is_deleted = 0
 )
     INSERT INTO nav.menu_item
-        (id, module_id, parent_id, code, item_type, label, icon, report_id, sort_order)
+        (id, module_id, user_scope, parent_id, code, item_type, label, icon, report_id, sort_order)
     VALUES
-        ('01JNAVMTFME00000000000000A', @EMAIL, NULL, 'EMAIL.SENT', 'report',
+        ('01JNAVMTFME00000000000000A', @EMAIL, 'tenant', NULL, 'EMAIL.SENT', 'report',
          N'Sent', 'send', @R_PORTAL_USER, 20);
 
 COMMIT TRANSACTION;

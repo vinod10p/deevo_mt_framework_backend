@@ -61,6 +61,9 @@ def test_seed_module_and_item_codes() -> None:
     for key in EXPECTED_REPORTS:
         assert f"'{key}'" in sql
     assert "rpt.report_definition" in sql
+    assert "user_scope" in sql
+    assert "INSERT INTO nav.screen" not in sql
+    assert "INSERT INTO nav.menu_item" in sql
 
 
 def test_seed_ids_are_fixed_crockford_ulids() -> None:

@@ -98,6 +98,42 @@ def test_build_menu_tree_nests_and_sorts() -> None:
     assert [child.code for child in tree[0].children] == ["CRM.ACCOUNTS", "CRM.ZZZ"]
     assert tree[1].children == []
     assert tree[1].report_key == "crm_lead_list"
+    assert tree[1].screen_code is None
+
+
+def test_build_menu_tree_drops_dead_screens() -> None:
+    rows = [
+        ItemRow(
+            id=REPORT_ITEM_ID,
+            parent_id=None,
+            code="CRM.BOARD",
+            item_type="screen",
+            label="Board",
+            icon="crm",
+            report_key=None,
+            sort_order=10,
+            updated_at=_NOW,
+            report_updated_at=None,
+            screen_code=None,
+        ),
+        ItemRow(
+            id=GROUP_ID,
+            parent_id=None,
+            code="CRM.DASH",
+            item_type="screen",
+            label="Dashboard",
+            icon="crm",
+            report_key=None,
+            sort_order=20,
+            updated_at=_NOW,
+            report_updated_at=None,
+            screen_code="crm_dashboard",
+        ),
+    ]
+    tree = build_menu_tree(rows)
+    assert [row.code for row in tree] == ["CRM.DASH"]
+    assert tree[0].screen_code == "crm_dashboard"
+    assert tree[0].report_key is None
 
 
 def test_build_menu_tree_drops_dead_reports_and_orphan_children() -> None:
@@ -226,8 +262,8 @@ def test_get_module_items_builds_tree_and_version() -> None:
     found.first.return_value = module
     db.scalars.return_value = found
     db.execute.return_value.all.return_value = [
-        (group, None, None),
-        (child, "crm_account_list", _CHILD_NOW),
+        (group, None, None, None, None),
+        (child, "crm_account_list", _CHILD_NOW, None, None),
     ]
 
     body = NavMenuService(db, tenant_user()).get_module_items("crm")

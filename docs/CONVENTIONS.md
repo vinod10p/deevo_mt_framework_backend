@@ -192,7 +192,7 @@ All frontends call `deevo_mt_framework_backend` (and/or their product backend) v
 | `audit` | `deevo_mt_framework_backend` | `audit_log` (DDL: [../sql/audit_schema_v2.sql](../sql/audit_schema_v2.sql); v1 dump still in [../sql/database_schema_v1.sql](../sql/database_schema_v1.sql)) |
 | `rpt` | `deevo_mt_framework_backend` | `report_definition`, `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` (DDL: [rpt_schema_v5.sql](rpt_schema_v5.sql), additive V2 in [txn_schema_v2.sql](txn_schema_v2.sql)). Per-user `report_permission` was dropped by RBAC v3. |
 | `txn` | `deevo_mt_framework_backend` | `screen`, `screen_section`, `screen_field`, `screen_field_config`, `lookup`, `lookup_column`, `screen_permission` (DDL: [txn_schema_v2.sql](txn_schema_v2.sql)). Metadata only — entity CRUD stays in product backends. |
-| `nav` | `deevo_mt_framework_backend` | `menu_module`, `menu_item` (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)). Platform-owned; tenants cannot change the catalog. |
+| `nav` | `deevo_mt_framework_backend` | `menu_module`, `screen` (SPA routes, not `txn.screen`), `menu_item` (DDL: [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql); seed: [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql)). Platform-owned; tenants cannot change the catalog. |
 | `crm` | `deevo_crm_backend` / `deevoflow_backend` | leads, contacts, accounts, deals, activities |
 
 ### Database Users

@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
-from mtf.nav.models import MenuItem, MenuModule
+from mtf.nav.models import MenuItem, MenuModule, NavScreen
 from mtf.nav.schemas import (
     NavMenuItemRead,
     NavModuleItemsRead,
@@ -21,12 +21,12 @@ from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import not_found
 
 _EMPTY_VERSION = "1970-01-01T00:00:00.000Z"
-_ITEM_TYPES = frozenset({"group", "report"})
+_ITEM_TYPES = frozenset({"group", "report", "screen"})
 
 
 @dataclass(frozen=True)
 class ItemRow:
-    """Live menu_item plus optional live report_key — used to nest the tree."""
+    """Live menu_item plus optional live report/screen codes — used to nest the tree."""
 
     id: str
     parent_id: str | None
@@ -38,6 +38,8 @@ class ItemRow:
     sort_order: int
     updated_at: datetime
     report_updated_at: datetime | None
+    screen_code: str | None = None
+    screen_updated_at: datetime | None = None
 
 
 def version_iso(value: datetime | None) -> str:
@@ -52,12 +54,13 @@ def version_iso(value: datetime | None) -> str:
 
 
 def build_menu_tree(rows: list[ItemRow]) -> list[NavMenuItemRead]:
-    """Nest live items. Drop report rows without a key and children of missing parents."""
+    """Nest live items. Drop report/screen rows without a live code, and orphan children."""
     live = [
         row
         for row in rows
         if row.item_type in _ITEM_TYPES
         and not (row.item_type == "report" and not row.report_key)
+        and not (row.item_type == "screen" and not row.screen_code)
     ]
     ids = {row.id for row in live}
     by_parent: dict[str | None, list[ItemRow]] = {}
@@ -78,6 +81,7 @@ def build_menu_tree(rows: list[ItemRow]) -> list[NavMenuItemRead]:
             label=row.label,
             icon=row.icon,
             report_key=row.report_key if row.item_type == "report" else None,
+            screen_code=row.screen_code if row.item_type == "screen" else None,
             sort_order=row.sort_order,
             children=children,
         )
@@ -143,6 +147,9 @@ class NavMenuService:
         timestamps.extend(
             row.report_updated_at for row in item_rows if row.report_updated_at is not None
         )
+        timestamps.extend(
+            row.screen_updated_at for row in item_rows if row.screen_updated_at is not None
+        )
         return NavModuleItemsRead(
             version=version_iso(max(timestamps)),
             module=_module_summary(module),
@@ -151,7 +158,13 @@ class NavMenuService:
 
     def _load_item_rows(self, module_id: str) -> list[ItemRow]:
         stmt = (
-            select(MenuItem, ReportDefinition.report_key, ReportDefinition.updated_at)
+            select(
+                MenuItem,
+                ReportDefinition.report_key,
+                ReportDefinition.updated_at,
+                NavScreen.code,
+                NavScreen.updated_at,
+            )
             .outerjoin(
                 ReportDefinition,
                 and_(
@@ -159,11 +172,20 @@ class NavMenuService:
                     _is_live(ReportDefinition),
                 ),
             )
+            .outerjoin(
+                NavScreen,
+                and_(
+                    NavScreen.id == MenuItem.screen_id,
+                    _is_live(NavScreen),
+                ),
+            )
             .where(MenuItem.module_id == module_id, _is_live(MenuItem))
             .order_by(MenuItem.sort_order, MenuItem.code)
         )
         rows: list[ItemRow] = []
-        for item, report_key, report_updated_at in self._db.execute(stmt).all():
+        for item, report_key, report_updated_at, screen_code, screen_updated_at in (
+            self._db.execute(stmt).all()
+        ):
             rows.append(
                 ItemRow(
                     id=item.id,
@@ -173,9 +195,11 @@ class NavMenuService:
                     label=item.label,
                     icon=item.icon,
                     report_key=report_key,
+                    screen_code=screen_code,
                     sort_order=item.sort_order,
                     updated_at=item.updated_at,
                     report_updated_at=report_updated_at,
+                    screen_updated_at=screen_updated_at,
                 )
             )
         return rows

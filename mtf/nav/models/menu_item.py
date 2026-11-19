@@ -15,20 +15,18 @@ _DT_UTC = DateTime(timezone=False)
 
 
 class MenuItem(Base):
-    """Submenu row under a module — group (level 1) or report (level 1 or 2)."""
+    """Submenu row — group (level 1), report, or nav.screen route."""
 
     __tablename__ = "menu_item"
     __table_args__ = {"schema": "nav"}
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    module_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("nav.menu_module.id"),
-        nullable=False,
-    )
+    module_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    #: Copied from the module; composite FK keeps it aligned.
+    user_scope: Mapped[str] = mapped_column(String(20), nullable=False)
     parent_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     code: Mapped[str] = mapped_column(String(100), nullable=False)
-    #: CK_menu_item_item_type: group | report
+    #: CK_menu_item_item_type: group | report | screen
     item_type: Mapped[str] = mapped_column(String(10), nullable=False)
     label: Mapped[str] = mapped_column(Unicode(100), nullable=False)
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -37,6 +35,7 @@ class MenuItem(Base):
         ForeignKey("rpt.report_definition.id"),
         nullable=True,
     )
+    screen_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))

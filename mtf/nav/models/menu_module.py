@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Unicode, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Unicode,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.mssql import ROWVERSION
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import FetchedValue
@@ -18,7 +27,10 @@ class MenuModule(Base):
     """Top-bar module — one live row per ``(user_scope, code)``."""
 
     __tablename__ = "menu_module"
-    __table_args__ = {"schema": "nav"}
+    __table_args__ = (
+        UniqueConstraint("id", "user_scope", name="UQ_menu_module_id_user_scope"),
+        {"schema": "nav"},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     code: Mapped[str] = mapped_column(String(50), nullable=False)

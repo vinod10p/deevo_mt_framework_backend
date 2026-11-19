@@ -97,7 +97,9 @@ def minimal_item(**kwargs: object) -> MenuItem:
         "item_type": "report",
         "label": "Leads",
         "icon": "users",
+        "user_scope": "tenant",
         "report_id": REPORT_ID,
+        "screen_id": None,
         "sort_order": 10,
         **_audit_fields(),
     }

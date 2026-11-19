@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NavItemType = Literal["group", "report"]
+NavItemType = Literal["group", "report", "screen"]
 
 
 class NavModuleSummary(BaseModel):
@@ -37,6 +37,7 @@ class NavMenuItemRead(BaseModel):
     label: str
     icon: str | None
     report_key: str | None
+    screen_code: str | None
     sort_order: int
     children: list[NavMenuItemRead] = Field(default_factory=list)
 

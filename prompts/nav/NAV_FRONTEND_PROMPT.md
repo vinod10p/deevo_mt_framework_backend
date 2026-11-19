@@ -67,11 +67,15 @@ page for menu clicks.
    If that returns 404, show the report not-found UI. Do not hide items by `/me` grants in this
    work — user-level menu filtering is a later backend change.
 4. **Only two nav endpoints.** No POST/PATCH/DELETE. No combined tree endpoint.
-5. **Branch on `item_type`.** `report` → navigate to the report runner. `group` → section with
-   `children`. Any other `item_type` → skip (do not crash).
-6. **Use `report_key`, never ids.** The JSON has no `id`, `module_id`, `parent_id`, or `report_id`.
-7. **Do not invent routes from item `code`.** `CRM.LEADS` is a menu key, not a URL. The URL is
-   `/rpt/{report_key}` (e.g. `/rpt/crm_lead_list`).
+5. **Branch on `item_type`.** `report` → report runner. `screen` → app route mapped from
+   `screen_code` (not `/txn/{code}` unless your map says so). `group` → section with `children`.
+   Any other `item_type` → skip (do not crash).
+6. **Use `report_key` / `screen_code`, never ids.** The JSON has no `id`, `module_id`, `parent_id`,
+   `report_id`, or `screen_id`.
+7. **Do not invent routes from item `code`.** `CRM.LEADS` is a menu key, not a URL. A report URL is
+   `/rpt/{report_key}`. A screen URL comes from a frontend map of `screen_code` (e.g.
+   `email_compose` → `/email`). Never treat `screen_code` as `txn.screen.screen_key` (`lead` is a
+   transaction screen, not a nav.screen code).
 8. **Do not replace the generic report catalog** (`/rpt`) or transaction screens (`/txn/...`).
    Those stay.
 
@@ -98,7 +102,8 @@ Typical sequence after login (login and `GET {API_BASE}/auth/me` already exist):
 
 1. `GET {API_BASE}/nav/modules` → draw modules.
 2. Select a module (or default to the first) → `GET {API_BASE}/nav/modules/{code}/items`.
-3. Click a `report` row → existing runner at `/rpt/{report_key}`.
+3. Click a `report` row → existing runner at `/rpt/{report_key}`. Click a `screen` row → the
+   route your app maps from `screen_code`.
 4. Switch module → fetch that module's items. Do not prefetch every module unless it is cheap and
    still keyed separately.
 
@@ -199,7 +204,18 @@ Do not display `code` to the user unless you need it for debugging.
       "label": "Leads",
       "icon": "users",
       "report_key": "crm_lead_list",
+      "screen_code": null,
       "sort_order": 10,
+      "children": []
+    },
+    {
+      "code": "EMAIL.COMPOSE",
+      "item_type": "screen",
+      "label": "Compose",
+      "icon": "mail",
+      "report_key": null,
+      "screen_code": "email_compose",
+      "sort_order": 15,
       "children": []
     },
     {
@@ -208,6 +224,7 @@ Do not display `code` to the user unless you need it for debugging.
       "label": "Tasks",
       "icon": "folder",
       "report_key": null,
+      "screen_code": null,
       "sort_order": 10,
       "children": [
         {
@@ -216,6 +233,7 @@ Do not display `code` to the user unless you need it for debugging.
           "label": "My tasks",
           "icon": "user",
           "report_key": "tenant_user_list",
+          "screen_code": null,
           "sort_order": 10,
           "children": []
         }
@@ -225,28 +243,33 @@ Do not display `code` to the user unless you need it for debugging.
 }
 ```
 
-`items` is **level 1 only**. Nesting is `children` (max one extra level: group → reports). Reports
-always have `children: []`. Groups may have an empty `children` array — hide empty groups in the
-UI if it looks better; do not fetch extra data.
+`items` is **level 1 only**. Nesting is `children` (max one extra level: group → report or screen).
+Reports and screens always have `children: []`. Groups may have an empty `children` array — hide
+empty groups in the UI if it looks better; do not fetch extra data.
 
 | Field | Use |
 |---|---|
 | `module` | Echo of the list row. Safe to use if the list cache is stale. |
-| `item_type` | `report` or `group` only from the DB. Skip anything else. |
+| `item_type` | `group`, `report`, or `screen`. Skip anything else. |
 | `label` | Visible text. |
-| `report_key` | Set on `report`. Always `null` on `group`. Navigate to `/rpt/{report_key}` (encode the key). |
+| `report_key` | Set on `report`; `null` otherwise. Navigate to `/rpt/{report_key}`. |
+| `screen_code` | Set on `screen`; `null` otherwise. Map to an app route. Never `/txn/{screen_code}` by default. |
 | `code` | React `key`. Do not parse it into a path. |
 | `icon` | Same mapping as modules. |
 
-**Click handler for `report`:**
+**Click handlers:**
 
 ```ts
-navigate(`/rpt/${encodeURIComponent(item.report_key)}`)
+if (item.item_type === 'report' && item.report_key)
+  navigate(`/rpt/${encodeURIComponent(item.report_key)}`)
+if (item.item_type === 'screen' && item.screen_code)
+  navigate(screenRoute(item.screen_code)) // app-owned map; unknown code → skip
 ```
 
-That is the existing generic runner. Do **not** send `tenant_id`. Do **not** open `/crm/leads`.
+Do **not** send `tenant_id`. Do **not** open `/crm/leads` from a report item.
 
-**Active state:** a sidebar row is active when `location.pathname === /rpt/${encodeURIComponent(report_key)}`.
+**Active state:** report row when pathname is `/rpt/{report_key}`; screen row when pathname matches
+the mapped route.
 
 ---
 
@@ -332,6 +355,7 @@ const navMenuItemSchema: z.ZodType<NavMenuItem> = z.lazy(() =>
     label: z.string(),
     icon: z.string().nullable(),
     report_key: z.string().nullable(),
+    screen_code: z.string().nullable(),
     sort_order: z.number().int(),
     children: z.array(navMenuItemSchema),
   }),

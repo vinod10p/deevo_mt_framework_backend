@@ -40,6 +40,7 @@ def _items_body() -> NavModuleItemsRead:
                 label="Leads",
                 icon="users",
                 report_key="crm_lead_list",
+                screen_code=None,
                 sort_order=10,
                 children=[],
             ),
@@ -49,6 +50,7 @@ def _items_body() -> NavModuleItemsRead:
                 label="Sales",
                 icon="folder",
                 report_key=None,
+                screen_code=None,
                 sort_order=20,
                 children=[
                     NavMenuItemRead(
@@ -57,6 +59,7 @@ def _items_body() -> NavModuleItemsRead:
                         label="Accounts",
                         icon="building",
                         report_key="crm_account_list",
+                        screen_code=None,
                         sort_order=10,
                         children=[],
                     )
@@ -116,8 +119,10 @@ def test_get_module_items_nested_tree() -> None:
     assert body["items"][0]["report_key"] == "crm_lead_list"
     assert body["items"][1]["item_type"] == "group"
     assert body["items"][1]["report_key"] is None
+    assert body["items"][1]["screen_code"] is None
     assert body["items"][1]["children"][0]["code"] == "CRM.ACCOUNTS"
     assert "report_id" not in r.text
+    assert "screen_id" not in r.text
     assert "module_id" not in r.text
 
 
