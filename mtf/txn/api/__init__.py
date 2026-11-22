@@ -1,7 +1,7 @@
 """HTTP API — txn domain (mounted at ``/api`` in ``main``).
 
 Product backends import ``require_screen_permission`` from ``mtf.txn.api.deps``.
-When the tenant has RBAC grants for the screen, that helper checks
+When the tenant has ``rbac.screens=on``, that helper checks
 ``screen.{key}.{action}`` only; otherwise it falls back to ``txn.screen_permission``.
 """
 

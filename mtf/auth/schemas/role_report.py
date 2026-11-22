@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class TenantReportCatalogRead(BaseModel):
+    """Grantable report row for Role Admin (not filtered by the caller's ``can_view``)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    report_key: str
+    display_name: str
+    description: str | None
+    scope_type: Literal["system", "tenant"]
 
 
 class RoleReportCreate(BaseModel):

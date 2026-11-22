@@ -64,6 +64,10 @@ def _permission(**overrides: object) -> Permission:
         "action": "view",
         "user_scope": "tenant",
         "description": "Step 8",
+        "module_code": "GENERAL",
+        "resource_name": "Step 8",
+        "sort_order": 0,
+        "is_tenant_grantable": True,
         "is_active": True,
         "is_deleted": False,
         "row_version": _ROW_VER,
@@ -116,6 +120,18 @@ def _report(**overrides: object) -> ReportDefinition:
     return ReportDefinition(**values)  # type: ignore[arg-type]
 
 
+def test_permission_create_uppercases_module_code() -> None:
+    data = PermissionCreate(
+        resource_type="screen",
+        resource_code="step8",
+        action="view",
+        user_scope="tenant",
+        module_code="crm",
+        resource_name="Lead",
+    )
+    assert data.module_code == "CRM"
+
+
 def test_compose_permission_code_keeps_dots_in_resource_code() -> None:
     assert compose_permission_code("api", "auth.role", "update") == "api.auth.role.update"
     assert compose_permission_code("screen", "lead", "view") == "screen.lead.view"
@@ -141,9 +157,50 @@ def test_create_permission_composes_code_and_audits() -> None:
     [perm] = _added(db, Permission)
     assert perm.code == "screen.step8.view"
     assert perm.resource_type == "screen"
+    assert perm.module_code == "GENERAL"
+    assert perm.resource_name == "step8"
+    assert perm.is_tenant_grantable is True
     [log] = _added(db, AuditLog)
     assert (log.action, log.schema_name, log.table_name) == ("insert", "auth", "permission")
     db.commit.assert_called_once()
+
+
+def test_create_system_permission_is_not_tenant_grantable() -> None:
+    db = MagicMock()
+    db.scalars.return_value = _first(None)
+    svc = PermissionService(db)
+    row = svc.create(
+        PermissionCreate(
+            resource_type="api",
+            resource_code="system.role",
+            action="update",
+            user_scope="system",
+            is_tenant_grantable=True,
+        ),
+        created_by=TEST_USER_ID,
+        actor=ACTOR,
+        source=SOURCE,
+    )
+    assert row.is_tenant_grantable is False
+    assert row.module_code == "GENERAL"
+
+
+def test_same_code_different_scope_is_allowed() -> None:
+    db = MagicMock()
+    db.scalars.return_value = _first(None)
+    svc = PermissionService(db)
+    row = svc.create(
+        PermissionCreate(
+            resource_type="screen",
+            resource_code="step8",
+            action="view",
+            user_scope="tenant_account",
+        ),
+        created_by=TEST_USER_ID,
+    )
+    assert row.code == "screen.step8.view"
+    assert row.user_scope == "tenant_account"
+    db.scalars.assert_called()
 
 
 def test_duplicate_permission_code_is_409() -> None:
@@ -181,6 +238,16 @@ def test_update_permission_does_not_change_code() -> None:
     assert updated.is_active is False
     [log] = _added(db, AuditLog)
     assert log.action == "update"
+
+
+def test_list_tenant_grantable_returns_mock_rows() -> None:
+    db = MagicMock()
+    grantable = _permission(is_tenant_grantable=True)
+    db.scalars.return_value = _first(grantable)
+    svc = PermissionService(db)
+    rows = svc.list_tenant_grantable()
+    assert rows == [grantable]
+    db.scalars.assert_called_once()
 
 
 def test_soft_delete_permission_sets_deleted_at() -> None:

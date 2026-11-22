@@ -45,7 +45,7 @@ Each table has one job; the platform owns the permission catalog and default gra
 
 | Table | Purpose | Key columns | Defined by |
 | --- | --- | --- | --- |
-| `auth.permission` | Catalog of every action that can be granted | `code` (unique), `resource_type`, `resource_code`, `action`, `user_scope` | Platform, seeded with each release |
+| `auth.permission` | Catalog of every action that can be granted | `code`, `resource_type`, `resource_code`, `action`, `user_scope`, `module_code`, `resource_name`, `sort_order`, `is_tenant_grantable` | Platform, seeded with each release |
 | `auth.role` | A named bundle of permissions | `tenant_id` (NULL = platform role, always `is_system = 1`), `code`, `name`, `user_scope`, `is_system` | Platform templates and tenant custom roles |
 | `auth.role_permission` | Which permissions a role grants | `role_id`, `permission_id`, `user_scope` | Whoever owns the role |
 | `auth.user_role` | Which roles a user holds, and where | `tenant_id`, `user_id`, `account_id`, `role_id`, `user_scope` | Tenant admin (system admin for system users) |
@@ -57,6 +57,8 @@ Each table has one job; the platform owns the permission catalog and default gra
 - `resource_type`: `menu`, `screen`, `api` (`menu` is ready for the dynamic menu later)
 - `action`: `view`, `create`, `update`, `delete`, `export`, `import`, `approve`
 - `user_scope`: `system`, `tenant`, `tenant_account`, matching `app_user.user_scope`
+- `module_code`: uppercase grouping for the Role Admin grid (`CRM`, `WF`, `GENERAL`)
+- `is_tenant_grantable`: shown on the tenant grid; system-scope rows are always `0`
 
 **Standard columns** on every table: `is_active`, soft delete (`is_deleted`, `deleted_at`, `deleted_by`), `row_version` for optimistic concurrency, and `created_at/by`, `updated_at/by` with foreign keys to `app_user`. Nothing is hard-deleted. A `CK_<table>_deleted` check on each table requires `deleted_at` and `deleted_by` whenever `is_deleted = 1`.
 
@@ -64,7 +66,7 @@ Each table has one job; the platform owns the permission catalog and default gra
 
 | Index | Enforces or speeds up |
 | --- | --- |
-| `UQ_permission_code` | Permission code unique among live rows |
+| `UQ_permission_scope_code` | Live permission code unique per `user_scope` (tenant and portal may share `screen.lead.view`) |
 | `UQ_role_tenant_code` | Role code unique within a tenant; two tenants can both have `support_agent` |
 | `UQ_role_platform_code` | Platform role codes unique across the platform |
 | `UQ_role_permission` | A permission granted once per role; can be re-granted after removal |
@@ -188,8 +190,8 @@ Until RBAC owns the gates, `tenant_user.role` and `tenant_account_user.role` rem
 
 | Membership table | `role` value | Template `auth.role.code` |
 | --- | --- | --- |
-| `tenant_user` | `owner`, `admin` | `tenant_admin` |
-| `tenant_user` | `member`, `viewer` | `tenant_member` |
+| `tenant_user` | `admin` | `tenant_admin` (thin: Role Admin + admin menus) |
+| `tenant_user` | `member` | *(none — product access via assigned custom roles)* |
 | `tenant_account_user` | `admin` | `account_admin` |
 | `tenant_account_user` | `member` | `account_member` |
 
@@ -201,20 +203,25 @@ The database guarantees structure; these rules need application logic and live i
 
 | The database enforces | The service enforces |
 | --- | --- |
-| No duplicate permissions, roles, grants or assignments | A tenant assigns only its own roles or platform templates |
-| Valid scope, resource type and action values | A `role_report` row's tenant matches its role's tenant (for tenant roles) |
-| Every reference points to a real row | Admins can't grant permissions they don't hold |
-| `user_scope` matches across user, role and permission (composite FKs) | Tenants can't edit roles with `is_system = 1` |
-| Place columns match the scope (`CK_user_role_scope_shape`) | A tenant always keeps at least one active admin |
-| Platform roles are always `is_system = 1`; system roles never belong to a tenant | The user has an active membership before a role is assigned |
-| Soft-deleted rows record when and by whom | `default_role_report` uses only platform template roles and platform-wide reports |
+| No duplicate permissions, roles, grants or assignments | Role Admins may grant any tenant-grantable catalog code; others can't grant what they don't hold |
+| Valid scope, resource type and action values | Tenants can't edit roles with `is_system = 1` |
+| Every reference points to a real row | A tenant always keeps at least one active admin |
+| `user_scope` matches across user, role and permission (composite FKs) | Membership is **active** (`is_active = 1`) before access is granted |
+| Place columns match the scope (`CK_user_role_scope_shape`) | |
+| Portal `account_id` belongs to the row's tenant (composite FKs; [`rbac_fix_01_tenant_integrity.sql`](rbac_fix_01_tenant_integrity.sql)) | |
+| Live `user_role` / `role_report` / `default_role_report` stay inside one tenant (triggers 51001–51007) | |
+| `auth.role.tenant_id` and `user_scope` are immutable (51008, 51010) | |
+| Platform roles are always `is_system = 1`; system roles never belong to a tenant | |
+| Soft-deleted rows record when and by whom | |
 | Concurrent edits don't overwrite each other | |
 
 Every role change, permission change and assignment writes a row to `audit.audit_log`. Because `deleted_by` is required, automated deletes such as tenant offboarding need a service-account row in `app_user` to attribute them to.
 
 ## Deployment
 
-Run [`auth_rbac_schema_v3.sql`](auth_rbac_schema_v3.sql) against `deevo_app_dev2`. It needs `auth.app_user`, `tenant.tenant`, `tenant.tenant_account` and `rpt.report_definition` to exist. Step 0 of the script adds a `UQ_app_user_id_user_scope` constraint to the existing `app_user` table; it can't fail on existing data because `id` is already unique. The script drops `rpt.report_permission` at the end; the `txn.screen_permission` drop is included but commented out.
+Run [`auth_rbac_schema_v3.sql`](auth_rbac_schema_v3.sql) against `deevo_app_dev2`. It needs `auth.app_user`, `tenant.tenant`, `tenant.tenant_account` and `rpt.report_definition` to exist. Step 0 of the script adds a `UQ_app_user_id_user_scope` constraint to the existing `app_user` table; it can't fail on existing data because `id` is already unique. The script drops `rpt.report_permission` at the end; the `txn.screen_permission` drop is included but commented out. Then apply [`rbac_fix_01_tenant_integrity.sql`](rbac_fix_01_tenant_integrity.sql) (composite account/tenant FKs and integrity triggers), then [`rbac_fix_02_permission_catalog.sql`](rbac_fix_02_permission_catalog.sql) (Role Admin catalog columns and unique `(user_scope, code)`), then [`auth_rbac_seed_tenant_catalog_v1.sql`](auth_rbac_seed_tenant_catalog_v1.sql) (CRM / WF / GENERAL grantable catalog), then [`rbac_fix_03_screens_flag.sql`](rbac_fix_03_screens_flag.sql) (one-way `rbac.screens=on`), then [`rbac_fix_04_default_member_role.sql`](rbac_fix_04_default_member_role.sql) (`auth.tenant_user.default_member_role_enabled`, default 1; deploy before the code that maps it).
+
+After the RBAC scripts, apply [`nav_menu_fix_01_permissions.sql`](nav_menu_fix_01_permissions.sql) (needs `nav.screen` and the tenant catalog seed), then [`rbac_fix_05_admin_member_only.sql`](rbac_fix_05_admin_member_only.sql). Fix 05 collapses membership to `admin` | `member`, thins `tenant_admin` to Users / Portal Accounts / Role Admin, and leaves members with no automatic template. The nav API returns only the items the caller may open.
 
 Order (see [`rbac_development_steps.md`](rbac_development_steps.md)):
 
@@ -226,12 +233,12 @@ Order (see [`rbac_development_steps.md`](rbac_development_steps.md)):
 6. Onboarding + dual-write on membership APIs
 7. Report enforcement (end-to-end proof)
 8. `GET /me`, then catalog and assignment CRUD
-9. Later: `create_nav_menu.sql` and `menu.*` permissions
+9. Nav menu: `nav_menu_schema_v1.sql`, then `nav_menu_fix_01_permissions.sql` (per-user menu filtering)
 
 **Open items**
 
 - [x] Platform-wide reports: `rpt.report_definition.scope_type = 'system'` with `tenant_id` NULL already exists. Keep `default_role_report`.
-- [ ] Check `txn.screen_permission` for data and references, then enable its drop. Product screens already prefer RBAC via `require_screen_permission` (step 10); keep the table until no tenant still needs the fallback.
+- [ ] Check `txn.screen_permission` for data and references, then enable its drop. Product screens use RBAC when `rbac.screens=on` via `require_screen_permission` (step 10); keep the table until no tenant still needs the fallback.
 - [ ] Create a service-account row in `app_user` for automated deletes
 - [ ] Drop `tenant_user.role` and `tenant_account_user.role` after dual-write is the only writer and RBAC owns the gates
 - [ ] Add `deleted_at` to `tenant_user` and `tenant_account_user` for consistency

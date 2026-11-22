@@ -9,7 +9,7 @@ Governing design (read-only, sibling repo):
 - `../deevo_mt_framework_backend/prompts/txn/Deevolight_Generic_Transaction_Screens_V2_Architecture.pdf`
 - `../deevo_mt_framework_backend/prompts/txn/Deevolight_Generic_Transaction_Screens_Backend_API_Design_FINAL.pdf`
 - `../deevo_mt_framework_backend/docs/txn_schema_v2.sql`
-- Live APIs already in MTF: `GET /api/screens/{screen_key}`, `require_screen_permission(screen_key, operation)` (RBAC `screen.lead.*` when the tenant has grants, else `txn.screen_permission` — not both-must-pass)
+- Live APIs already in MTF: `GET /api/screens/{screen_key}`, `require_screen_permission(screen_key, operation)` (RBAC `screen.lead.*` when `rbac.screens=on`, else `txn.screen_permission` — not both-must-pass)
 - React contract (separate frontend workspace): [TRANSACTION_FRONTEND_PROMPT.md](TRANSACTION_FRONTEND_PROMPT.md)
 
 This repo’s rules win on layering, commits, error codes, and URL prefix (`docs/CONVENTIONS.md` in `deevoflow_backend`).
@@ -76,7 +76,7 @@ After this work, a tenant JWT can:
 
 1. `GET /api/v1/screens/lead` — MTF metadata (no DeevoFlow logic).
 2. `GET /api/v1/lookups/tenant-users?search=&page=&page_size=` and `?ids=` (plus `/lookups/crm/{category}`, `/lookups/lead-statuses`) — product lookups, reusable across screens.
-3. `POST /api/v1/crm/lead-screen` and `GET/PATCH/DELETE /api/v1/crm/lead-screen/{id}` — product CRUD in the **record envelope**, gated by `require_screen_permission("lead", …)`. Keep that import; MTF now prefers `screen.lead.view|create|update|delete` when the tenant has RBAC grants, and falls back to `txn.screen_permission` only when it does not. Do **not** add a second `require_permission` check. The old `/api/v1/crm/leads` API is untouched.
+3. `POST /api/v1/crm/lead-screen` and `GET/PATCH/DELETE /api/v1/crm/lead-screen/{id}` — product CRUD in the **record envelope**, gated by `require_screen_permission("lead", …)`. Keep that import; MTF now prefers `screen.lead.view|create|update|delete` when the tenant has `rbac.screens=on`, and falls back to `txn.screen_permission` only when it does not. Do **not** add a second `require_permission` check. The old `/api/v1/crm/leads` API is untouched.
 
 ### Envelope (GET / POST / PATCH)
 

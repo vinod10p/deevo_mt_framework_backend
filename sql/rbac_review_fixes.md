@@ -4,7 +4,7 @@ Nov 9, 2026 · @vinod
 
 Companion to [rbac_database_design.md](rbac_database_design.md) and [rbac_development_steps.md](rbac_development_steps.md). Steps 0–10 are done. Items **1 and 2** from the post-step-10 review are done (dual-write no longer deletes custom roles; deactivating a role runs the last-admin check). This file is the remaining code review (items 3–9). Do not start until CRM tenant testing is far enough along.
 
-**Out of scope here:** item 10 (Lead behaviour for members vs portal), moving assignment routes to `require_permission`, the development-steps **Later** list (`menu.*`, drop membership.role, drop `txn.screen_permission`, service-account user).
+**Out of scope here:** item 10 (Lead behaviour for members vs portal), the development-steps **Later** list (`menu.*`, drop membership.role, drop `txn.screen_permission`, service-account user). Tenant assignment routes now use `require_permission("api.auth.role.update")`. Screen fallback is the one-way `rbac.screens` tenant setting, not catalog/`user_role` inference.
 
 ## Status
 

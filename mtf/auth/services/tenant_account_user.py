@@ -176,7 +176,7 @@ class TenantAccountUserService:
         account_id: str,
         actor_user_id: str,
     ) -> None:
-        """CRM: tenant staff with owner/admin role on ``auth.tenant_user``."""
+        """CRM: tenant staff with admin role on ``auth.tenant_user``."""
         from mtf.auth.models.tenant_user import TenantUser
 
         actor = self._db.scalars(
@@ -188,7 +188,7 @@ class TenantAccountUserService:
             )
             .limit(1)
         ).first()
-        if actor is None or actor.role not in ("owner", "admin"):
+        if actor is None or actor.role != "admin":
             forbidden("AUTH", "Insufficient permissions")
 
     def assert_portal_account_admin(

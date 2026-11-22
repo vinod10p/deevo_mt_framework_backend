@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Unicode, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Unicode,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.mssql import ROWVERSION
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import FetchedValue
@@ -18,6 +27,7 @@ class Permission(Base):
     """Catalog of grantable actions — table ``auth.permission``.
 
     ``code`` is ``<resource_type>.<resource_code>.<action>``.
+    Live uniqueness is ``(user_scope, code)`` (``UQ_permission_scope_code``).
     ``UQ_permission_id_user_scope`` exists so ``role_permission`` can enforce
     matching ``user_scope`` through a composite foreign key.
     """
@@ -38,6 +48,16 @@ class Permission(Base):
     #: CK_permission_user_scope: system | tenant | tenant_account
     user_scope: Mapped[str] = mapped_column(String(20), nullable=False)
     description: Mapped[str | None] = mapped_column(Unicode(300), nullable=True)
+    #: CK_permission_module_code_upper: non-empty, stored uppercase
+    module_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    resource_name: Mapped[str] = mapped_column(Unicode(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    #: CK_permission_system_not_grantable: system scope => 0
+    is_tenant_grantable: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("1"),
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

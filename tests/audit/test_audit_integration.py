@@ -265,7 +265,7 @@ def test_tenant_jwt_cannot_read_unscoped_log(
             json={
                 "email": email,
                 "password": password,
-                "role": "owner",
+                "role": "admin",
                 "first_name": "Audit",
             },
             headers=system_headers,

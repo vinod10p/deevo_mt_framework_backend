@@ -18,7 +18,12 @@ from mtf.rpt.models import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
 from mtf.tenant.models import TenantAccount
-from tests.rpt.conftest import OTHER_TENANT_ID, live_portal_user, live_tenant_staff, tenant_user
+from tests.rpt.conftest import (
+    OTHER_TENANT_ID,
+    live_portal_user,
+    sample_report_actor,
+    tenant_user,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -50,7 +55,7 @@ def tenant_id() -> str:
 
 @pytest.fixture
 def client(tenant_id: str) -> TestClient:
-    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff(
+    app.dependency_overrides[get_current_user] = lambda: sample_report_actor(
         tenant_id=tenant_id
     )
     return TestClient(app)
@@ -60,7 +65,7 @@ def test_static_lookup_returns_all_options(client: TestClient) -> None:
     r = client.get(ROLE_URL)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert [i["value"] for i in body["items"]] == ["owner", "admin", "member", "viewer"]
+    assert [i["value"] for i in body["items"]] == ["admin", "member"]
     assert body["has_more"] is False
 
 
@@ -71,17 +76,17 @@ def test_lookup_limit_sets_has_more(client: TestClient) -> None:
 
 
 def test_lookup_values_resolve_labels(client: TestClient) -> None:
-    r = client.get(ROLE_URL, params=[("values", "viewer"), ("values", "admin")])
+    r = client.get(ROLE_URL, params=[("values", "member"), ("values", "admin")])
     assert r.status_code == 200
     assert r.json()["items"] == [
         {"value": "admin", "label": "Admin"},
-        {"value": "viewer", "label": "Viewer"},
+        {"value": "member", "label": "Member"},
     ]
 
 
 def test_lookup_search(client: TestClient) -> None:
-    body = client.get(ROLE_URL, params={"q": "own"}).json()
-    assert [i["value"] for i in body["items"]] == ["owner"]
+    body = client.get(ROLE_URL, params={"q": "adm"}).json()
+    assert [i["value"] for i in body["items"]] == ["admin"]
 
 
 def test_tenant_scoped_lookup_round_trip(client: TestClient) -> None:

@@ -60,7 +60,7 @@ def require_screen_permission(
 ) -> Callable[..., ScreenEffectivePermissions]:
     """Enforce one screen operation. ``screen_key`` is a product constant (e.g. ``"lead"``).
 
-    If the tenant has RBAC grants for this screen, check ``screen.{key}.{action}``
+    If the tenant has ``rbac.screens=on``, check ``screen.{key}.{action}``
     only (``403 AUTH_FORBIDDEN``). Otherwise fall back to ``txn.screen_permission``
     (``403 SCREEN_FORBIDDEN``). Not both-must-pass.
 

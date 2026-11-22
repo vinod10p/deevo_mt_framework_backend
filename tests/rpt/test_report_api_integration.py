@@ -17,7 +17,7 @@ from main import app
 from mtf.rpt.models import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
-from tests.rpt.conftest import live_portal_user, live_tenant_staff
+from tests.rpt.conftest import live_portal_user, live_tenant_staff, sample_report_actor
 
 pytestmark = pytest.mark.integration
 
@@ -44,14 +44,22 @@ def require_seeded_report() -> None:
 
 
 def test_list_reports_includes_seeded_system_report() -> None:
-    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff()
+    staff = live_tenant_staff()
+    assert staff.tenant_id is not None
+    app.dependency_overrides[get_current_user] = lambda: sample_report_actor(
+        tenant_id=staff.tenant_id
+    )
     r = TestClient(app).get("/api/reports")
     assert r.status_code == 200, r.text
     assert _SEEDED_KEY in [item["report_key"] for item in r.json()]
 
 
 def test_get_seeded_report_metadata() -> None:
-    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff()
+    staff = live_tenant_staff()
+    assert staff.tenant_id is not None
+    app.dependency_overrides[get_current_user] = lambda: sample_report_actor(
+        tenant_id=staff.tenant_id
+    )
     r = TestClient(app).get(f"/api/reports/{_SEEDED_KEY}")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -70,16 +78,27 @@ def test_get_seeded_report_metadata() -> None:
     assert body["actions"] == []
 
 
-def test_system_report_visible_to_any_tenant_and_portal() -> None:
-    client = TestClient(app)
-    for user in (live_tenant_staff(), live_portal_user()):
-        app.dependency_overrides[get_current_user] = lambda u=user: u
-        r = client.get(f"/api/reports/{_SEEDED_KEY}")
-        assert r.status_code == 200, r.text
+def test_thin_admin_hides_reports_without_grants() -> None:
+    """Thin tenant_admin has no default report grants — catalog hides them as 404."""
+    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff()
+    r = TestClient(app).get(f"/api/reports/{_SEEDED_KEY}")
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "REPORT_NOT_FOUND"
+
+
+def test_system_report_visible_to_portal_with_grants() -> None:
+    user = live_portal_user()
+    app.dependency_overrides[get_current_user] = lambda: user
+    r = TestClient(app).get(f"/api/reports/{_SEEDED_KEY}")
+    assert r.status_code == 200, r.text
 
 
 def test_unknown_report_key_returns_404() -> None:
-    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff()
+    staff = live_tenant_staff()
+    assert staff.tenant_id is not None
+    app.dependency_overrides[get_current_user] = lambda: sample_report_actor(
+        tenant_id=staff.tenant_id
+    )
     r = TestClient(app).get("/api/reports/no_such_report_key")
     assert r.status_code == 404
     assert r.json()["detail"]["code"] == "REPORT_NOT_FOUND"

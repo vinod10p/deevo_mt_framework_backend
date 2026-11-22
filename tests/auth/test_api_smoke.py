@@ -33,6 +33,9 @@ def test_openapi_lists_auth_user_routes() -> None:
     assert "/api/auth/roles/{role_id}" in paths
     assert "/api/auth/roles/{role_id}/permissions" in paths
     assert "/api/auth/roles/{role_id}/default-reports" in paths
+    assert "/api/tenant/permissions" in paths
+    assert "get" in paths["/api/tenant/permissions"]
+    assert "post" not in paths["/api/tenant/permissions"]
     assert "/api/tenant/roles" in paths
     assert "/api/tenant/roles/{role_id}" in paths
     assert "/api/tenant/roles/{role_id}/permissions" in paths

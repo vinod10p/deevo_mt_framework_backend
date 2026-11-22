@@ -40,10 +40,15 @@ def _batches(sql: str) -> list[str]:
 def _apply_backfill() -> None:
     sql = Path(BACKFILL_PATH).read_text(encoding="utf-8")
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        for batch in _batches(sql):
-            if batch.lstrip().upper().startswith("USE "):
-                continue
-            conn.execute(text(batch))
+        try:
+            for batch in _batches(sql):
+                if batch.lstrip().upper().startswith("USE "):
+                    continue
+                conn.execute(text(batch))
+        finally:
+            # Scripts set NOCOUNT ON; a pooled connection that keeps it makes
+            # SQLAlchemy see rowcount -1 (StaleDataError) in later tests.
+            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
 
 
 def _live_count(sql: str) -> int:
@@ -125,6 +130,8 @@ def test_membership_roles_map_to_template_codes(backfilled: None) -> None:
                    AND ur.account_id IS NULL
                    AND ur.is_deleted = 0
                 JOIN auth.role r ON r.id = ur.role_id
+                  AND r.tenant_id IS NULL
+                  AND r.code = 'tenant_admin'
                 WHERE tu.is_deleted = 0
                 """
             )
@@ -140,14 +147,17 @@ def test_membership_roles_map_to_template_codes(backfilled: None) -> None:
                    AND ur.account_id = tau.account_id
                    AND ur.is_deleted = 0
                 JOIN auth.role r ON r.id = ur.role_id
+                  AND r.tenant_id IS NULL
+                  AND r.code IN ('account_admin', 'account_member')
                 WHERE tau.is_deleted = 0
                 """
             )
         ).all()
     assert tenant_rows
     for membership_role, code in tenant_rows:
-        expected = "tenant_admin" if membership_role in ("owner", "admin") else "tenant_member"
-        assert code == expected
+        # Members have no template row; this query only joins live template assignments.
+        assert code == "tenant_admin"
+        assert membership_role == "admin"
     for membership_role, code in portal_rows:
         expected = "account_admin" if membership_role == "admin" else "account_member"
         assert code == expected
@@ -169,7 +179,7 @@ def test_owner_resolves_lead_and_role_update(backfilled: None) -> None:
             select(TenantUser).where(
                 TenantUser.is_deleted == False,  # noqa: E712
                 TenantUser.is_active == True,  # noqa: E712
-                TenantUser.role.in_(("owner", "admin")),
+                TenantUser.role == "admin",
             )
         ).first()
         if membership is None:
@@ -211,10 +221,43 @@ def test_member_resolves_lead_view_only(backfilled: None) -> None:
     assert "api.auth.role.update" not in codes
 
 
+def test_every_live_tenant_has_screens_flag(backfilled: None) -> None:
+    with SessionLocal() as db:
+        missing = db.execute(
+            text(
+                """
+                SELECT t.id
+                FROM tenant.tenant t
+                WHERE t.is_deleted = 0
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM tenant.tenant_setting s
+                        WHERE s.tenant_id = t.id
+                          AND s.[key] = 'rbac.screens'
+                          AND s.[value] = N'on'
+                          AND s.is_deleted = 0
+                  )
+                """
+            )
+        ).fetchall()
+    assert missing == []
+
+
 def test_backfill_is_idempotent(backfilled: None) -> None:
     before_roles = _live_count("SELECT COUNT(*) FROM auth.user_role WHERE is_deleted = 0")
     before_reports = _live_count("SELECT COUNT(*) FROM auth.role_report WHERE is_deleted = 0")
+    before_flags = _live_count(
+        "SELECT COUNT(*) FROM tenant.tenant_setting "
+        "WHERE [key] = 'rbac.screens' AND is_deleted = 0"
+    )
     _apply_backfill()
     assert _live_count("SELECT COUNT(*) FROM auth.user_role WHERE is_deleted = 0") == before_roles
     reports_after = _live_count("SELECT COUNT(*) FROM auth.role_report WHERE is_deleted = 0")
     assert reports_after == before_reports
+    assert (
+        _live_count(
+            "SELECT COUNT(*) FROM tenant.tenant_setting "
+            "WHERE [key] = 'rbac.screens' AND is_deleted = 0"
+        )
+        == before_flags
+    )

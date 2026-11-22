@@ -21,7 +21,7 @@ from mtf.tenant.services import TenantService
 router = APIRouter(tags=["tenant-staff"])
 
 # Module-level checker so tests can ``app.dependency_overrides[require_owner_or_admin]``.
-require_owner_or_admin = require_tenant_role("owner", "admin")
+require_owner_or_admin = require_tenant_role("admin")
 
 
 def get_tenant_service(db: Session = Depends(get_db)) -> TenantService:

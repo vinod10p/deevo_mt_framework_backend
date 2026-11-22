@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from mtf.audit.service import (
@@ -26,6 +26,7 @@ from mtf.auth.services.rbac_catalog import (
     require_export_needs_view,
     utc_naive_now,
 )
+from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import generate_id
@@ -34,6 +35,30 @@ from mtf.shared.security import generate_id
 class RoleReportService:
     def __init__(self, session: Session) -> None:
         self._db = session
+
+    def list_grantable_reports(
+        self,
+        tenant_id: str,
+        *,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> list[ReportDefinition]:
+        """Platform + tenant-owned live reports Role Admin may grant (unfiltered catalog)."""
+        stmt = (
+            select(ReportDefinition)
+            .where(
+                ReportDefinition.is_active == True,  # noqa: E712
+                ReportDefinition.is_deleted == False,  # noqa: E712
+                or_(
+                    ReportDefinition.tenant_id.is_(None),
+                    ReportDefinition.tenant_id == tenant_id,
+                ),
+            )
+            .order_by(ReportDefinition.report_key)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(self._db.scalars(stmt).all())
 
     def list_for_role(
         self,

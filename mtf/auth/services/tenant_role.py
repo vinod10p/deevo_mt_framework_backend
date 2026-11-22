@@ -232,7 +232,7 @@ class TenantRoleService:
                 "AUTH_ROLE_PERMISSION",
                 "Permission user_scope must match the role user_scope",
             )
-        assert_no_escalation(resolver, actor, [permission.code])
+        assert_no_escalation(resolver, actor, [permission.code], db=self._db)
         if self._live_grant(role.id, permission.id) is not None:
             conflict("AUTH_ROLE_PERMISSION", "Permission is already granted to this role")
 

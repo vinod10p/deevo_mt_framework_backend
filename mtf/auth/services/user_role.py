@@ -11,8 +11,10 @@ from mtf.audit.service import (
     audit_soft_delete,
     row_snapshot,
 )
+from mtf.auth.models.role import Role
 from mtf.auth.models.user_role import UserRole
 from mtf.auth.schemas.user_role import UserRoleCreate
+from mtf.auth.services.membership_rbac import ADMIN_TEMPLATE_CODE, MEMBER_TEMPLATE_CODE
 from mtf.auth.services.permission_resolver import Actor, PermissionResolver
 from mtf.auth.services.rbac_assignment import (
     assert_no_escalation,
@@ -26,6 +28,20 @@ from mtf.auth.services.rbac_catalog import apply_soft_delete, commit_or_conflict
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found
 from mtf.shared.security import generate_id
+
+
+def _reject_membership_template(role: Role) -> None:
+    """Platform tenant_admin / tenant_member follow membership dual-write, not Role Admin."""
+    if (
+        role.tenant_id is None
+        and role.user_scope == "tenant"
+        and role.code in {ADMIN_TEMPLATE_CODE, MEMBER_TEMPLATE_CODE}
+    ):
+        conflict(
+            "AUTH_USER_ROLE",
+            f"{role.code} is managed by tenant membership (admin/member); "
+            "change the user's membership role or assign a custom role",
+        )
 
 
 class UserRoleService:
@@ -82,7 +98,13 @@ class UserRoleService:
         role = require_assignable_role(self._db, tenant_id, data.role_id)
         if role.user_scope != "tenant":
             not_found("AUTH_ROLE", "Role not found")
-        assert_no_escalation(resolver, actor, permission_codes_for_role(self._db, role.id))
+        _reject_membership_template(role)
+        assert_no_escalation(
+            resolver,
+            actor,
+            permission_codes_for_role(self._db, role.id),
+            db=self._db,
+        )
         if self._live_assignment(tenant_id, user_id, role.id) is not None:
             conflict("AUTH_USER_ROLE", "User already holds this role")
 
@@ -128,6 +150,9 @@ class UserRoleService:
         row = self._live_assignment(tenant_id, user_id, role_id)
         if row is None:
             not_found("AUTH_USER_ROLE", "Role assignment not found")
+        role = self._db.get(Role, role_id)
+        if role is not None:
+            _reject_membership_template(role)
         assert_not_last_admin(
             self._db,
             tenant_id,

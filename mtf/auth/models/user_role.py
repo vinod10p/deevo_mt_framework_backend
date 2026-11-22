@@ -42,6 +42,11 @@ class UserRole(Base):
             ["auth.role.id", "auth.role.user_scope"],
             name="FK_user_role_role_id",
         ),
+        ForeignKeyConstraint(
+            ["account_id", "tenant_id"],
+            ["tenant.tenant_account.id", "tenant.tenant_account.tenant_id"],
+            name="FK_user_role_account_tenant",
+        ),
         CheckConstraint(
             "("
             "(user_scope = 'system' AND tenant_id IS NULL AND account_id IS NULL) OR "
@@ -50,7 +55,8 @@ class UserRole(Base):
             ")",
             name="CK_user_role_scope_shape",
         ),
-        {"schema": "auth"},
+        # AFTER INSERT/UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        {"schema": "auth", "implicit_returning": False},
     )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
@@ -60,11 +66,7 @@ class UserRole(Base):
         nullable=True,
     )
     user_id: Mapped[str] = mapped_column(String(26), nullable=False)
-    account_id: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("tenant.tenant_account.id"),
-        nullable=True,
-    )
+    account_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     role_id: Mapped[str] = mapped_column(String(26), nullable=False)
     #: CK_user_role_user_scope: system | tenant | tenant_account
     user_scope: Mapped[str] = mapped_column(String(20), nullable=False)

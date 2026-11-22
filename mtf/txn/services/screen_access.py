@@ -1,17 +1,16 @@
-"""Screen gates: RBAC when the tenant has grants, else ``txn.screen_permission``.
+"""Screen gates: RBAC when ``rbac.screens=on``, else ``txn.screen_permission``.
 
 Not both-must-pass. Product routes keep calling ``require_screen_permission``.
+The per-tenant flag is one-way (backfill / onboarding). Empty grants deny.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mtf.auth.models.permission import Permission
-from mtf.auth.models.user_role import UserRole
 from mtf.auth.services.permission_resolver import Actor, PermissionResolver
 from mtf.shared.exceptions import forbidden
+from mtf.tenant.services.rbac_screens import tenant_has_screen_rbac
 from mtf.txn.models.screen import Screen
 from mtf.txn.services.screen_permission import (
     ScreenEffectivePermissions,
@@ -32,40 +31,21 @@ def screen_permission_code(screen_key: str, operation: ScreenOperation) -> str:
     return f"screen.{screen_key}.{SCREEN_OPERATION_ACTIONS[operation]}"
 
 
-def tenant_uses_screen_rbac(db: Session, tenant_id: str, screen_key: str) -> bool:
-    """True when the catalog has ``screen.{key}.*`` and the tenant has live ``user_role``.
+def tenant_uses_screen_rbac(
+    db: Session,
+    tenant_id: str,
+    screen_key: str | None = None,
+) -> bool:
+    """True when this tenant has live ``rbac.screens = on``.
 
-    SQL Server has no ``SELECT EXISTS (...)``; use ``TOP 1`` via ``limit(1)``.
+    ``screen_key`` is ignored: the switch is tenant-wide, not per screen.
     """
-    has_catalog = bool(
-        db.scalar(
-            select(Permission.id)
-            .where(
-                Permission.resource_type == "screen",
-                Permission.resource_code == screen_key,
-                Permission.is_active == True,  # noqa: E712
-                Permission.is_deleted == False,  # noqa: E712
-            )
-            .limit(1)
-        )
-    )
-    if not has_catalog:
-        return False
-    return bool(
-        db.scalar(
-            select(UserRole.id)
-            .where(
-                UserRole.tenant_id == tenant_id,
-                UserRole.is_active == True,  # noqa: E712
-                UserRole.is_deleted == False,  # noqa: E712
-            )
-            .limit(1)
-        )
-    )
+    del screen_key
+    return tenant_has_screen_rbac(db, tenant_id)
 
 
 class ScreenAccessService:
-    """One instance per request — memoizes the RBAC-vs-legacy choice per screen."""
+    """One instance per request — memoizes the RBAC-vs-legacy choice per tenant."""
 
     def __init__(
         self,
@@ -77,15 +57,15 @@ class ScreenAccessService:
         self._db = db
         self._resolver = resolver or PermissionResolver(db)
         self._legacy = legacy or ScreenPermissionService(db)
-        self._uses_rbac: dict[tuple[str, str], bool] = {}
+        self._uses_rbac: dict[str, bool] = {}
 
-    def uses_rbac(self, tenant_id: str, screen_key: str) -> bool:
-        key = (tenant_id, screen_key)
-        cached = self._uses_rbac.get(key)
+    def uses_rbac(self, tenant_id: str, screen_key: str | None = None) -> bool:
+        del screen_key
+        cached = self._uses_rbac.get(tenant_id)
         if cached is not None:
             return cached
-        flag = tenant_uses_screen_rbac(self._db, tenant_id, screen_key)
-        self._uses_rbac[key] = flag
+        flag = tenant_uses_screen_rbac(self._db, tenant_id)
+        self._uses_rbac[tenant_id] = flag
         return flag
 
     def _rbac_permissions(self, user: Actor, screen_key: str) -> ScreenEffectivePermissions:

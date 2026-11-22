@@ -1,4 +1,4 @@
-"""Screen access: RBAC when the tenant has grants, else screen_permission."""
+"""Screen access: RBAC when rbac.screens=on, else screen_permission."""
 
 from __future__ import annotations
 
@@ -37,25 +37,23 @@ def test_screen_permission_code_maps_operations() -> None:
     assert screen_permission_code("lead", "delete") == "screen.lead.delete"
 
 
-def test_uses_rbac_requires_catalog_and_assignment() -> None:
+def test_uses_rbac_follows_tenant_flag() -> None:
     db = MagicMock()
-    db.scalar.side_effect = [True, True]
+    db.scalar.return_value = "row-id"
     assert tenant_uses_screen_rbac(db, TEST_TENANT_ID, "lead") is True
+    assert tenant_uses_screen_rbac(db, TEST_TENANT_ID, "no_such_screen") is True
 
-    db.scalar.side_effect = [False]
+    db.scalar.return_value = None
     assert tenant_uses_screen_rbac(db, TEST_TENANT_ID, "lead") is False
 
-    db.scalar.side_effect = [True, False]
-    assert tenant_uses_screen_rbac(db, TEST_TENANT_ID, "lead") is False
 
-
-def test_uses_rbac_is_memoized() -> None:
+def test_uses_rbac_is_memoized_per_tenant() -> None:
     db = MagicMock()
-    db.scalar.side_effect = [True, True]
+    db.scalar.return_value = "row-id"
     svc = ScreenAccessService(db, resolver=MagicMock(), legacy=MagicMock())
     assert svc.uses_rbac(TEST_TENANT_ID, "lead") is True
-    assert svc.uses_rbac(TEST_TENANT_ID, "lead") is True
-    assert db.scalar.call_count == 2
+    assert svc.uses_rbac(TEST_TENANT_ID, "account") is True
+    assert db.scalar.call_count == 1
 
 
 def test_rbac_path_does_not_call_legacy() -> None:
@@ -63,7 +61,7 @@ def test_rbac_path_does_not_call_legacy() -> None:
     resolver.permission_codes.return_value = frozenset({"screen.lead.view"})
     legacy = MagicMock()
     svc = ScreenAccessService(MagicMock(), resolver=resolver, legacy=legacy)
-    svc._uses_rbac[(TEST_TENANT_ID, "lead")] = True
+    svc._uses_rbac[TEST_TENANT_ID] = True
     perms = svc.resolve(tenant_user(), "lead")
     assert perms.can_view is True
     assert perms.can_add is False
@@ -78,7 +76,7 @@ def test_rbac_deny_does_not_fall_back_to_legacy() -> None:
     legacy = MagicMock()
     legacy.resolve.return_value = _ALLOWED
     svc = ScreenAccessService(MagicMock(), resolver=resolver, legacy=legacy)
-    svc._uses_rbac[(TEST_TENANT_ID, "lead")] = True
+    svc._uses_rbac[TEST_TENANT_ID] = True
     with pytest.raises(HTTPException) as exc_info:
         svc.require(tenant_user(), "lead", "view")
     assert exc_info.value.status_code == 403
@@ -91,7 +89,7 @@ def test_legacy_path_when_tenant_has_no_rbac() -> None:
     legacy = MagicMock()
     legacy.resolve.return_value = _ALLOWED
     svc = ScreenAccessService(MagicMock(), resolver=resolver, legacy=legacy)
-    svc._uses_rbac[(TEST_TENANT_ID, "lead")] = False
+    svc._uses_rbac[TEST_TENANT_ID] = False
     perms = svc.require(tenant_user(), "lead", "view")
     assert perms.can_view is True
     resolver.permission_codes.assert_not_called()
@@ -102,7 +100,7 @@ def test_legacy_deny_is_screen_forbidden() -> None:
     legacy = MagicMock()
     legacy.resolve.return_value = _DENIED
     svc = ScreenAccessService(MagicMock(), resolver=MagicMock(), legacy=legacy)
-    svc._uses_rbac[(TEST_TENANT_ID, "lead")] = False
+    svc._uses_rbac[TEST_TENANT_ID] = False
     with pytest.raises(HTTPException) as exc_info:
         svc.require(tenant_user(), "lead", "view")
     assert exc_info.value.detail["code"] == "SCREEN_FORBIDDEN"

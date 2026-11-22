@@ -22,7 +22,7 @@ from mtf.tenant.models import TenantAccount
 from tests.rpt.conftest import (
     OTHER_TENANT_ID,
     live_portal_user,
-    live_tenant_staff,
+    sample_report_actor,
     tenant_user,
 )
 
@@ -63,7 +63,7 @@ def tenant_id() -> str:
 
 @pytest.fixture
 def client(tenant_id: str) -> TestClient:
-    app.dependency_overrides[get_current_user] = lambda: live_tenant_staff(
+    app.dependency_overrides[get_current_user] = lambda: sample_report_actor(
         tenant_id=tenant_id
     )
     return TestClient(app)
@@ -116,11 +116,11 @@ def test_every_sample_report_runs_with_json_types_matching_metadata(
 
 
 def test_filters_apply(client: TestClient) -> None:
-    criteria = {"role": ["owner"], "is_active": True, "joined_date": {"to": "2100-12-31"}}
+    criteria = {"role": ["admin"], "is_active": True, "joined_date": {"to": "2100-12-31"}}
     body = client.post(
         "/api/reports/tenant_user_list/run", json={"criteria": criteria}
     ).json()
-    assert all(row["role"] == "owner" and row["is_active"] is True for row in body["rows"])
+    assert all(row["role"] == "admin" and row["is_active"] is True for row in body["rows"])
 
     none = client.post(
         "/api/reports/tenant_account_list/run",

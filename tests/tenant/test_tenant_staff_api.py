@@ -117,7 +117,7 @@ def test_owner_can_update_other_staff() -> None:
     )
     app.dependency_overrides[get_current_user] = lambda: owner
     svc = MagicMock(spec=["get_membership", "assert_can_manage_users", "update_for_tenant"])
-    svc.get_membership.return_value = MagicMock(role="owner")
+    svc.get_membership.return_value = MagicMock(role="admin")
     svc.update_for_tenant.return_value = minimal_tenant_user_detail(role="admin")
     app.dependency_overrides[get_tenant_user_service] = lambda: svc
 
@@ -140,7 +140,7 @@ def test_owner_can_create_staff() -> None:
     )
     app.dependency_overrides[get_current_user] = lambda: owner
     svc = MagicMock(spec=["assert_can_manage_users", "create_for_tenant"])
-    svc.assert_can_manage_users.return_value = MagicMock(role="owner")
+    svc.assert_can_manage_users.return_value = MagicMock(role="admin")
     svc.create_for_tenant.return_value = minimal_tenant_user_detail()
     app.dependency_overrides[get_tenant_user_service] = lambda: svc
 

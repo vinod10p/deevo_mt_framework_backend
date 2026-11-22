@@ -43,16 +43,41 @@ class PermissionService:
             stmt = stmt.where(Permission.user_scope == user_scope)
         if resource_type is not None:
             stmt = stmt.where(Permission.resource_type == resource_type)
-        stmt = stmt.order_by(Permission.code).offset(skip).limit(limit)
+        stmt = stmt.order_by(
+            Permission.module_code,
+            Permission.sort_order,
+            Permission.code,
+        )
+        stmt = stmt.offset(skip).limit(limit)
+        return list(self._db.scalars(stmt).all())
+
+    def list_tenant_grantable(self) -> list[Permission]:
+        """Live tenant-scope rows the Role Admin grid may grant."""
+        stmt = (
+            select(Permission)
+            .where(
+                Permission.is_deleted == False,  # noqa: E712
+                Permission.is_active == True,  # noqa: E712
+                Permission.user_scope == "tenant",
+                Permission.is_tenant_grantable == True,  # noqa: E712
+            )
+            .order_by(
+                Permission.module_code,
+                Permission.sort_order,
+                Permission.resource_name,
+                Permission.code,
+            )
+        )
         return list(self._db.scalars(stmt).all())
 
     def get(self, permission_id: str) -> Permission:
         return require_live_permission(self._db, permission_id)
 
-    def _live_by_code(self, code: str) -> Permission | None:
+    def _live_by_code(self, code: str, user_scope: str) -> Permission | None:
         return self._db.scalars(
             select(Permission).where(
                 Permission.code == code,
+                Permission.user_scope == user_scope,
                 Permission.is_deleted == False,  # noqa: E712
             )
         ).first()
@@ -66,9 +91,11 @@ class PermissionService:
         source: AuditSource | None = None,
     ) -> Permission:
         code = compose_permission_code(data.resource_type, data.resource_code, data.action)
-        if self._live_by_code(code) is not None:
+        if self._live_by_code(code, data.user_scope) is not None:
             conflict("AUTH_PERMISSION", "Permission code already exists")
 
+        resource_name = data.resource_name if data.resource_name is not None else data.resource_code
+        is_tenant_grantable = False if data.user_scope == "system" else data.is_tenant_grantable
         row = Permission(
             id=generate_id(),
             code=code,
@@ -77,6 +104,10 @@ class PermissionService:
             action=data.action,
             user_scope=data.user_scope,
             description=data.description,
+            module_code=data.module_code,
+            resource_name=resource_name,
+            sort_order=data.sort_order,
+            is_tenant_grantable=is_tenant_grantable,
             created_by=created_by,
             updated_by=created_by,
         )
@@ -114,6 +145,8 @@ class PermissionService:
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(row, key, value)
+        if row.user_scope == "system":
+            row.is_tenant_grantable = False
         row.updated_at = utc_naive_now()
         if updated_by is not None:
             row.updated_by = updated_by

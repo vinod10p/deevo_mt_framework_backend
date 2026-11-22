@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-TenantUserRole = Literal["owner", "admin", "member", "viewer"]
+TenantUserRole = Literal["admin", "member"]
 
 
 class TenantUserCreate(BaseModel):

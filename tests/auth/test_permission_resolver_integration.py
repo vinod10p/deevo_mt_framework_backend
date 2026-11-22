@@ -82,6 +82,9 @@ def _grant(db: Session, membership: TenantUser, *, role_active: bool = True) -> 
         resource_code=resource_code,
         action="view",
         user_scope="tenant",
+        module_code="GENERAL",
+        resource_name=resource_code,
+        is_tenant_grantable=True,
     )
     role = Role(
         id=generate_id(),

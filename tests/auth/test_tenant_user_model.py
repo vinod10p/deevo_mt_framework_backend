@@ -32,6 +32,7 @@ def test_tenant_user_column_mapping() -> None:
     names = set(TenantUser.__mapper__.columns.keys())
     assert names == {
         "id",
+        "default_member_role_enabled",
         "tenant_id",
         "user_id",
         "role",

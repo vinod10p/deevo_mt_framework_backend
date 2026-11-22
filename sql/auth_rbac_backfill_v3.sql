@@ -3,12 +3,12 @@ auth_rbac_backfill_v3.sql
 Idempotent backfill / "apply defaults to all tenants" for RBAC v3.
 
 Run AFTER auth_rbac_seed_v3.sql. Safe to re-run: inserts only missing
-role_report and user_role rows. Fails if a platform template role is
-missing or a live membership.role cannot be mapped.
+role_report and user_role rows. Tenant members get no template assignment.
+Fails if a platform template role is missing or a live membership.role cannot be mapped.
 
 Dual-write map (membership.role → platform auth.role.code):
-  tenant_user.owner|admin  → tenant_admin
-  tenant_user.member|viewer → tenant_member
+  tenant_user.admin  → tenant_admin (thin: Users, Portal Accounts, Role Admin)
+  tenant_user.member → no template (rbac_fix_05)
   tenant_account_user.admin  → account_admin
   tenant_account_user.member → account_member
 
@@ -37,9 +37,9 @@ IF EXISTS (
     FROM auth.tenant_user tu
     JOIN tenant.tenant t ON t.id = tu.tenant_id AND t.is_deleted = 0
     WHERE tu.is_deleted = 0
-      AND tu.role NOT IN ('owner', 'admin', 'member', 'viewer')
+      AND tu.role NOT IN ('admin', 'member')
 )
-    THROW 50011, 'RBAC backfill: tenant_user.role is not owner|admin|member|viewer.', 1;
+    THROW 50011, 'RBAC backfill: tenant_user.role is not admin|member.', 1;
 
 IF EXISTS (
     SELECT 1
@@ -97,7 +97,7 @@ WHERE t.is_deleted = 0
     );
 
 /* -------------------------------------------------------------------------
-   2. tenant_user.role → user_role
+   2. tenant_user.role → user_role (admins only; members get no template)
    ------------------------------------------------------------------------- */
 INSERT INTO auth.user_role (id, tenant_id, user_id, account_id, role_id, user_scope)
 SELECT
@@ -118,13 +118,9 @@ JOIN auth.app_user AS u
 JOIN auth.role AS r
     ON r.tenant_id IS NULL
    AND r.is_deleted = 0
-   AND r.code = CASE tu.role
-                    WHEN 'owner'  THEN 'tenant_admin'
-                    WHEN 'admin'  THEN 'tenant_admin'
-                    WHEN 'member' THEN 'tenant_member'
-                    WHEN 'viewer' THEN 'tenant_member'
-                END
+   AND r.code = 'tenant_admin'
 WHERE tu.is_deleted = 0
+  AND tu.role = 'admin'
   AND NOT EXISTS (
         SELECT 1
         FROM auth.user_role AS ur
@@ -170,6 +166,28 @@ WHERE tau.is_deleted = 0
           AND ur.account_id = tau.account_id
           AND ur.role_id = r.id
           AND ur.is_deleted = 0
+    );
+
+/* -------------------------------------------------------------------------
+   4. Fail-close screen RBAC (tenant.tenant_setting rbac.screens = on)
+   ------------------------------------------------------------------------- */
+INSERT INTO tenant.tenant_setting (id, tenant_id, [key], [value], is_active, is_deleted)
+SELECT
+    LEFT('01JRACBKF' + CONVERT(varchar(64), HASHBYTES(
+        'SHA2_256', CONCAT(N'set|rbac.screens|', t.id)), 2), 26),
+    t.id,
+    'rbac.screens',
+    N'on',
+    1,
+    0
+FROM tenant.tenant AS t
+WHERE t.is_deleted = 0
+  AND NOT EXISTS (
+        SELECT 1
+        FROM tenant.tenant_setting AS s
+        WHERE s.tenant_id = t.id
+          AND s.[key] = 'rbac.screens'
+          AND s.is_deleted = 0
     );
 
 COMMIT TRANSACTION;

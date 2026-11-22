@@ -20,6 +20,8 @@ from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
 from mtf.shared.security import generate_id
+from mtf.tenant.models.tenant_setting import TenantSetting
+from mtf.tenant.services.rbac_screens import RBAC_SCREENS_KEY, RBAC_SCREENS_ON
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
 
 pytestmark = pytest.mark.integration
@@ -128,10 +130,19 @@ def test_create_tenant_copies_default_role_reports(
                     RoleReport.is_deleted == False,  # noqa: E712
                 )
             )
+            flag = db.scalars(
+                select(TenantSetting).where(
+                    TenantSetting.tenant_id == tenant_id,
+                    TenantSetting.key == RBAC_SCREENS_KEY,
+                    TenantSetting.is_deleted == False,  # noqa: E712
+                )
+            ).first()
         assert default_count is not None
         if default_count == 0:
             pytest.skip("no default_role_report rows; apply sql/auth_rbac_seed_v3.sql")
         assert copied == default_count
+        assert flag is not None
+        assert flag.value == RBAC_SCREENS_ON
     finally:
         if tenant_id is not None:
             client.delete(f"/api/tenant/{tenant_id}")

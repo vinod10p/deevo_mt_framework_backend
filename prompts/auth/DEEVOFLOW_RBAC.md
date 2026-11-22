@@ -22,7 +22,7 @@ This repo’s rules win on layering, commits, error codes, and URL prefix (`docs
 1. **Tenant staff only.** Scope is `deevo_crm` / JWT `user_scope=tenant`. Do **not** change portal (`tenant_account`) routes, portal role grants, or account-user APIs.
 2. **Do not implement RBAC in DeevoFlow.** No new SQL, no `app/` copies of `mtf.auth.models` permission/role tables, no second resolver.
 3. **Do not add role-management routes in `app/`.** Catalog and assignment HTTP already live on the mounted MTF routers. React (later) calls those URLs directly. Do not wrap them in a DeevoFlow proxy.
-4. **Do not build add/edit screens** for roles or permissions in this backend work. Membership `role` (`owner` / `admin` / `member` / `viewer`) on the existing tenant-user APIs is enough to test.
+4. **Do not build add/edit screens** for roles or permissions in this backend work. Membership `role` (`admin` / `member`) on the existing tenant-user APIs is enough to test.
 5. **Staff membership string stays master.** Existing create/update/delete of tenant users still send `role`. Dual-write to `auth.user_role` already runs inside MTF `TenantUserService`. Do not write `user_role` yourself.
 6. **JWT never carries grants.** UI (later) reads `GET /api/v1/auth/me`. Backend still authorizes every request with the resolver. Do not add `permissions` to `TokenResponse`.
 7. **Lead (and other screens) keep `require_screen_permission`.** Do **not** wrap those routes with a second `require_permission("screen.lead.*")`.
@@ -96,17 +96,17 @@ On every tenant-user create/update/soft-delete, MTF upserts `user_role`:
 
 | `tenant_user.role` | Platform `auth.role.code` |
 | --- | --- |
-| `owner`, `admin` | `tenant_admin` |
-| `member`, `viewer` | `tenant_member` |
+| `admin` | `tenant_admin` (thin: Role Admin + admin menus) |
+| `member` | *(none — product access only via assigned custom roles)* |
 
-If the template role is missing, the membership write fails (`409`). Sync only replaces those **template** roles; extra custom roles assigned via `/api/v1/tenant/users/{id}/roles` survive a name/phone edit. Deleting the membership still revokes every assignment in that place.
+Membership is `admin` \| `member` only (`owner`/`viewer` retired). If the admin template is missing, the membership write fails (`409`). Sync only replaces those **template** roles; extra custom roles assigned via `/api/v1/tenant/users/{id}/roles` survive a name/phone edit. Deleting the membership still revokes every assignment in that place.
 
 ### Screen gates (`require_screen_permission`)
 
 Product routes keep this import. MTF chooses one path, not both:
 
-- Tenant has RBAC for that screen when live `auth.permission` has `resource_type=screen` and `resource_code={key}` **and** the tenant has a live `user_role` row.
-- Then check `screen.{key}.{action}` only: `view`→`view`, `add`→`create`, `edit`→`update`, `delete`→`delete`. Deny → `403 AUTH_FORBIDDEN`.
+- Tenant has RBAC when live `tenant.tenant_setting` is `rbac.screens=on` (set at backfill / new tenant; one-way).
+- Then check `screen.{key}.{action}` only: `view`→`view`, `add`→`create`, `edit`→`update`, `delete`→`delete`. Deny → `403 AUTH_FORBIDDEN`. Empty grants deny.
 - Else fall back to `txn.screen_permission`. Deny → `403 SCREEN_FORBIDDEN`.
 - An RBAC deny does **not** consult `screen_permission` or `screen.allow_*`.
 - `GET /api/v1/screens/{screen_key}` uses the same branch for the `permissions` object.
@@ -119,10 +119,10 @@ Platform roles: `tenant_admin`, `tenant_member` (plus portal/system templates yo
 
 | Role | Screen / API grants |
 | --- | --- |
-| `tenant_admin` | `screen.lead.view\|create\|update\|delete\|export`, `api.auth.role.update` |
-| `tenant_member` | `screen.lead.view` only |
+| `tenant_admin` | `api.auth.role.update`, `menu.admin_users.view`, `menu.admin_portal_accounts.view` |
+| `tenant_member` | *(empty — unused for new members)* |
 
-Last-admin means at least one live assignment holds `api.auth.role.update` (not `manage`; the schema check does not allow `manage`). Escalation: an actor cannot grant a permission code they do not hold. Tenant assignment routes are still gated with JWT tenant + membership `owner`/`admin`, not `require_permission("api.auth.role.update")` yet.
+Last-admin means at least one live assignment holds `api.auth.role.update` (not `manage`; the schema check does not allow `manage`). Holders of Role Admin may grant any live tenant-grantable catalog permission (and any report); other actors cannot grant codes they do not hold. Tenant assignment routes are gated with JWT tenant + `require_permission("api.auth.role.update")`.
 
 ---
 
@@ -181,20 +181,22 @@ Extra fields (already on `UserMeRead`):
 
 - `permissions`: sorted catalog codes the resolver loaded for this request.
 - `reports`: only rows with `can_view`. Use `report_key` in the UI; backend catalog/`/run` still enforce.
-- `role` is still the membership string (`owner`/`admin`/`member`/`viewer`), not `tenant_admin`.
+- `role` is still the membership string (`admin`/`member`), not `tenant_admin`.
 
 Login / refresh `TokenResponse` must **not** gain these fields.
 
 ### Staff membership (already dual-writes)
 
-Existing tenant user create/update/delete. Body still uses `role: "owner"|"admin"|"member"|"viewer"`. Do not change the payload.
+Existing tenant user create/update/delete. Body still uses `role: "admin"|"member"`. Do not change the payload.
 
 ### Tenant assignment (call later from React; do not wrap in `app/`)
 
-Gated with JWT tenant + owner/admin membership.
+Gated with JWT tenant + `require_permission("api.auth.role.update")`. React contract:
+[ROLE_ADMIN_FRONTEND_PROMPT.md](ROLE_ADMIN_FRONTEND_PROMPT.md).
 
 | Method | Path | Body |
 | --- | --- | --- |
+| GET | `/api/v1/tenant/permissions` | grantable catalog (no POST/PATCH/DELETE) |
 | GET, POST | `/api/v1/tenant/roles` | POST `{ "code", "name", "description?" }` — `code` `^[a-z][a-z0-9_]*$` |
 | GET, PATCH, DELETE | `/api/v1/tenant/roles/{role_id}` | PATCH needs `row_version`. Cannot edit platform (`is_system`) roles. Last-admin deactivate → `409 AUTH_ROLE_CONFLICT` |
 | GET, POST | `/api/v1/tenant/roles/{role_id}/permissions` | POST `{ "permission_id" }` |
@@ -247,8 +249,8 @@ Do not use `require_permission("screen.lead.view")` on Lead — the screen helpe
 
 | Caller | Lead GET/list | Lead POST/PATCH/DELETE |
 | --- | --- | --- |
-| Tenant `owner` / `admin` | 200 | 200 / 204 |
-| Tenant `member` / `viewer` | 200 | **403 `AUTH_FORBIDDEN`** |
+| Tenant `admin` (or custom role with Lead grants) | 200 | 200 / 204 |
+| Tenant `member` without Lead grants | **403** | **403 `AUTH_FORBIDDEN`** |
 | No Bearer | 401 | 401 |
 
 Reports the user’s roles cannot view: omitted from `GET /api/v1/reports`; GET-by-key and `/run` return **404**.
@@ -258,9 +260,9 @@ Reports the user’s roles cannot view: omitted from `GET /api/v1/reports`; GET-
 ## New tenant screen later (do not implement now)
 
 1. System catalog: permission rows `screen.{key}.view|create|update|delete` with `user_scope=tenant`.
-2. Grant on `tenant_admin` (and `tenant_member` if members should see it).
+2. Grant on a **custom** tenant role (assign to members). Do not fatten thin `tenant_admin`.
 3. Gate product routes with `require_screen_permission("{key}", ...)`.
-4. Until catalog + tenant `user_role` exist, the helper stays on `txn.screen_permission`.
+4. Until the tenant has `rbac.screens=on`, the helper stays on `txn.screen_permission`.
 
 ---
 
@@ -279,7 +281,9 @@ Reports the user’s roles cannot view: omitted from `GET /api/v1/reports`; GET-
 1. **Inspect mounts** — `main.py`: auth, tenant, reports, txn. List paths. Do not add duplicate routers. Stop if `require_screen_permission` cannot be imported.
 2. **Gate Lead** — add `require_screen_permission` to existing Lead and lead-screen routes (keep `require_scope("tenant")`). Tests: admin write succeeds; member write is 403 `AUTH_FORBIDDEN`.
 3. **Confirm `/me`** — test that a tenant JWT gets `permissions` (list of strings) and `reports` (list of `{report_key, can_view, can_export}`). Do not change `TokenResponse`.
-4. Stop. Role admin UI, portal, and new screens are later prompts.
+4. Stop. Tenant Role Admin backend is
+   [DEEVOFLOW_TENANT_ROLE_ADMIN.md](DEEVOFLOW_TENANT_ROLE_ADMIN.md). React is
+   [ROLE_ADMIN_FRONTEND_PROMPT.md](ROLE_ADMIN_FRONTEND_PROMPT.md). Portal is later.
 
 ## Security checklist
 

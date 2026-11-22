@@ -25,7 +25,15 @@ def test_tenant_table_location() -> None:
 
 def test_tenant_column_mapping() -> None:
     names = set(Tenant.__mapper__.columns.keys())
-    assert {"id", "name", "status", "plan_type", "row_version", "features_enabled", "country"}.issubset(names)
+    assert {
+        "id",
+        "name",
+        "status",
+        "plan_type",
+        "row_version",
+        "features_enabled",
+        "country",
+    }.issubset(names)
 
 
 def test_tenant_audit_foreign_keys_point_at_app_user() -> None:

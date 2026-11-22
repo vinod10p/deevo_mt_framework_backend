@@ -2,7 +2,7 @@
 
 * ``user`` views: any ``tenant`` or ``tenant_account`` user, on their own views only.
 * ``tenant`` views: tenant staff (``user_scope = tenant``) whose ``auth.tenant_user.role``
-  is ``owner`` or ``admin``.
+  is ``admin``.
 * ``system`` views: never through the API in V1 — authored by SQL script.
 """
 
@@ -30,7 +30,7 @@ MANAGE_ACTION_BY_SCOPE: dict[str, ViewAction] = {
     "system": "report.view.manage_system",
 }
 
-_TENANT_VIEW_ROLES = frozenset({"owner", "admin"})
+_TENANT_VIEW_ROLES = frozenset({"admin"})
 
 
 class ReportViewAuthorizer:

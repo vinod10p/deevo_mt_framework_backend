@@ -84,6 +84,10 @@ def _permission(**overrides: object) -> Permission:
         "action": "view",
         "user_scope": "tenant",
         "description": None,
+        "module_code": "GENERAL",
+        "resource_name": "Lead",
+        "sort_order": 0,
+        "is_tenant_grantable": True,
         "is_active": True,
         "is_deleted": False,
     }
@@ -144,6 +148,30 @@ def test_escalation_allows_held_permission() -> None:
         {"screen.lead.view", ADMIN_PERMISSION_CODE}
     )
     assert_no_escalation(resolver, ACTOR, ["screen.lead.view"])
+
+
+def test_role_admin_may_grant_tenant_grantable_permissions() -> None:
+    resolver = MagicMock()
+    resolver.permission_codes.return_value = frozenset({ADMIN_PERMISSION_CODE})
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = ["screen.lead.view", "menu.wf_inbox.view"]
+    assert_no_escalation(
+        resolver,
+        ACTOR,
+        ["screen.lead.view", "menu.wf_inbox.view"],
+        db=db,
+    )
+
+
+def test_role_admin_still_blocked_from_non_grantable() -> None:
+    resolver = MagicMock()
+    resolver.permission_codes.return_value = frozenset({ADMIN_PERMISSION_CODE})
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = []
+    with pytest.raises(HTTPException) as exc_info:
+        assert_no_escalation(resolver, ACTOR, ["system.secret"], db=db)
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "AUTH_ROLE_FORBIDDEN"
 
 
 def test_cannot_edit_platform_role() -> None:

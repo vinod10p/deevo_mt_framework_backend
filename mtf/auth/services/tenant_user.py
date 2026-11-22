@@ -20,6 +20,7 @@ from mtf.audit.service import (
 from mtf.auth.models import TenantUser, User
 from mtf.auth.schemas.tenant_user import TenantMembershipCreate, TenantMembershipUpdate
 from mtf.auth.services.membership_rbac import (
+    lock_membership,
     revoke_tenant_user_roles,
     sync_tenant_user_role,
 )
@@ -70,6 +71,7 @@ class TenantUserService:
         user_id: str,
         *,
         include_deleted: bool = False,
+        lock: bool = False,
     ) -> TenantUser | None:
         filters = [
             TenantUser.tenant_id == tenant_id,
@@ -78,6 +80,8 @@ class TenantUserService:
         if not include_deleted:
             filters.append(TenantUser.is_deleted == False)  # noqa: E712
         stmt = select(TenantUser).where(*filters).limit(1)
+        if lock:
+            stmt = lock_membership(stmt)
         return self._db.scalars(stmt).first()
 
     def _raise_email_in_use(self) -> None:
@@ -137,11 +141,13 @@ class TenantUserService:
         )
         return list(self._db.scalars(stmt).all())
 
-    def get(self, tenant_user_id: str) -> TenantUser | None:
+    def get(self, tenant_user_id: str, *, lock: bool = False) -> TenantUser | None:
         stmt = select(TenantUser).where(
             TenantUser.id == tenant_user_id,
             TenantUser.is_deleted == False,  # noqa: E712
         )
+        if lock:
+            stmt = lock_membership(stmt)
         return self._db.scalars(stmt).first()
 
     def _existing_membership(self, tenant_id: str, user_id: str) -> TenantUser | None:
@@ -191,14 +197,14 @@ class TenantUserService:
         actor = self._membership_by_tenant_and_user(tenant_id, actor_user_id)
         if actor is None or not actor.is_active:
             not_found("TENANT_USER", "Membership not found")
-        if actor.role not in ("owner", "admin"):
+        if actor.role != "admin":
             forbidden("AUTH", "Insufficient permissions")
         return actor
 
-    def _count_active_owners(self, tenant_id: str, *, exclude_user_id: str | None = None) -> int:
+    def _count_active_admins(self, tenant_id: str, *, exclude_user_id: str | None = None) -> int:
         filters = [
             TenantUser.tenant_id == tenant_id,
-            TenantUser.role == "owner",
+            TenantUser.role == "admin",
             TenantUser.is_deleted == False,  # noqa: E712
             TenantUser.is_active == True,  # noqa: E712
         ]
@@ -308,6 +314,7 @@ class TenantUserService:
             user_id=user.id,
             membership_role=row.role,
             is_active=row.is_active is not False,
+            default_member_role_enabled=row.default_member_role_enabled is not False,
             actor_id=created_by,
             actor=actor,
             source=source,
@@ -334,7 +341,7 @@ class TenantUserService:
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
     ) -> dict[str, Any]:
-        row = self._membership_by_tenant_and_user(tenant_id, user_id)
+        row = self._membership_by_tenant_and_user(tenant_id, user_id, lock=True)
         if row is None:
             not_found("TENANT_USER", "Membership not found")
 
@@ -346,25 +353,25 @@ class TenantUserService:
             not_found("USER", "User not found")
 
         if actor_membership is not None and actor_membership.user_id == user_id:
-            if actor_membership.role not in ("owner", "admin"):
+            if actor_membership.role != "admin":
                 if data.role is not None or data.is_active is not None:
                     conflict("TENANT_USER", "Cannot change your own role or status")
-            elif data.role is not None and data.role == "owner":
-                conflict("TENANT_USER", "Cannot assign owner role to yourself")
+            elif data.role is not None and data.role != "admin":
+                conflict("TENANT_USER", "Cannot demote your own admin membership")
 
         now = _utc_naive_now()
         before_row = row_snapshot(row)
         before_user = row_snapshot(user)
 
         if data.role is not None and data.role != row.role:
-            if row.role == "owner" and self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
-                conflict("TENANT_USER", "Cannot remove the last owner from the tenant")
+            if row.role == "admin" and self._count_active_admins(tenant_id, exclude_user_id=user_id) == 0:
+                conflict("TENANT_USER", "Cannot remove the last admin from the tenant")
             row.role = data.role
 
         if data.is_active is not None:
-            if not data.is_active and row.role == "owner":
-                if self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
-                    conflict("TENANT_USER", "Cannot deactivate the last owner")
+            if not data.is_active and row.role == "admin":
+                if self._count_active_admins(tenant_id, exclude_user_id=user_id) == 0:
+                    conflict("TENANT_USER", "Cannot deactivate the last admin")
             row.is_active = data.is_active
         if data.first_name is not None:
             user.first_name = data.first_name
@@ -412,6 +419,7 @@ class TenantUserService:
             user_id=user_id,
             membership_role=row.role,
             is_active=row.is_active is not False,
+            default_member_role_enabled=row.default_member_role_enabled is not False,
             actor_id=updated_by,
             actor=actor,
             source=source,
@@ -438,8 +446,8 @@ class TenantUserService:
         if row_version is not None and row.row_version != row_version:
             row_version_conflict("TENANT_USER")
 
-        if row.role == "owner" and self._count_active_owners(tenant_id, exclude_user_id=user_id) == 0:
-            conflict("TENANT_USER", "Cannot remove the last owner from the tenant")
+        if row.role == "admin" and self._count_active_admins(tenant_id, exclude_user_id=user_id) == 0:
+            conflict("TENANT_USER", "Cannot remove the last admin from the tenant")
 
         before = row_snapshot(row)
         row.is_active = False
@@ -523,6 +531,7 @@ class TenantUserService:
             user_id=data.user_id,
             membership_role=row.role,
             is_active=row.is_active is not False,
+            default_member_role_enabled=row.default_member_role_enabled is not False,
             actor_id=created_by,
             actor=actor,
             source=source,
@@ -540,7 +549,7 @@ class TenantUserService:
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
     ) -> TenantUser:
-        row = self.get(tenant_user_id)
+        row = self.get(tenant_user_id, lock=True)
         if row is None:
             not_found("TENANT_USER", "Membership not found")
 
@@ -583,6 +592,7 @@ class TenantUserService:
                 user_id=row.user_id,
                 membership_role=row.role,
                 is_active=row.is_active is not False,
+                default_member_role_enabled=row.default_member_role_enabled is not False,
                 actor_id=updated_by,
                 actor=actor,
                 source=source,

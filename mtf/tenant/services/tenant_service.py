@@ -22,6 +22,7 @@ from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import generate_id
 from mtf.tenant.models import Tenant
 from mtf.tenant.schemas import TenantCreate, TenantUpdate
+from mtf.tenant.services.rbac_screens import enable_screen_rbac
 
 
 def _utc_naive_now() -> datetime:
@@ -103,6 +104,11 @@ class TenantService:
                 created_by=created_by,
                 actor=actor,
                 source=source,
+            )
+            enable_screen_rbac(
+                self._db,
+                tenant_id=tenant.id,
+                created_by=created_by,
             )
             self._db.commit()
         except IntegrityError as e:

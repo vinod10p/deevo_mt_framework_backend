@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Unicode, UnicodeText, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    String,
+    Unicode,
+    UnicodeText,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.mssql import ROWVERSION
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import FetchedValue
@@ -18,7 +27,10 @@ class TenantAccount(Base):
     """Generic account under a tenant (customer, vendor, employee, etc.)."""
 
     __tablename__ = "tenant_account"
-    __table_args__ = {"schema": "tenant"}
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="UQ_tenant_account_id_tenant_id"),
+        {"schema": "tenant"},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(26), ForeignKey("tenant.tenant.id"), nullable=False)

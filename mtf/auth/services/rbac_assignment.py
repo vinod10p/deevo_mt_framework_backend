@@ -123,13 +123,45 @@ def permission_codes_for_role(db: Session, role_id: str) -> list[str]:
     )
 
 
+def _tenant_grantable_codes(db: Session, codes: Iterable[str]) -> frozenset[str]:
+    wanted = {code for code in codes}
+    if not wanted:
+        return frozenset()
+    return frozenset(
+        db.scalars(
+            select(Permission.code).where(
+                Permission.code.in_(sorted(wanted)),
+                Permission.user_scope == "tenant",
+                Permission.is_tenant_grantable == True,  # noqa: E712
+                Permission.is_active == True,  # noqa: E712
+                Permission.is_deleted == False,  # noqa: E712
+            )
+        ).all()
+    )
+
+
 def assert_no_escalation(
     resolver: PermissionResolver,
     actor: Actor,
     codes: Iterable[str],
+    *,
+    db: Session | None = None,
 ) -> None:
+    """Block granting codes the actor lacks.
+
+    Holders of ``api.auth.role.update`` may grant any live tenant-grantable
+    catalog code (thin admin still builds CRM roles). Non-grantable / unknown
+    codes still require the actor to hold them.
+    """
+    wanted = [code for code in codes]
+    if not wanted:
+        return
     held = resolver.permission_codes(actor)
-    missing = sorted({code for code in codes if code not in held})
+    if ADMIN_PERMISSION_CODE in held and db is not None:
+        grantable = _tenant_grantable_codes(db, wanted)
+        missing = sorted({code for code in wanted if code not in held and code not in grantable})
+    else:
+        missing = sorted({code for code in wanted if code not in held})
     if missing:
         forbidden("AUTH_ROLE", "Cannot grant a permission you do not hold")
 
@@ -142,6 +174,9 @@ def assert_report_escalation(
     can_view: bool,
     can_export: bool,
 ) -> None:
+    """Role Admin may grant any report; others only what they can already view/export."""
+    if ADMIN_PERMISSION_CODE in resolver.permission_codes(actor):
+        return
     grant = resolver.report_grants(actor).get(report_id)
     if can_view and (grant is None or not grant.can_view):
         forbidden("AUTH_ROLE", "Cannot grant report access you do not hold")

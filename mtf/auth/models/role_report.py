@@ -23,7 +23,10 @@ class RoleReport(Base):
     """
 
     __tablename__ = "role_report"
-    __table_args__ = {"schema": "auth"}
+    __table_args__ = (
+        # AFTER INSERT/UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        {"schema": "auth", "implicit_returning": False},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(

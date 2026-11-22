@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 _FAR_PAST = "2000-01-01"
 _FAR_FUTURE = "2100-12-31"
 _ALL_ACCOUNT_TYPES = ["customer", "vendor", "employee"]
-_ALL_STAFF_ROLES = ["owner", "admin", "member", "viewer"]
+_ALL_STAFF_ROLES = ["admin", "member"]
 
 SAMPLE_CRITERIA: dict[str, dict[str, Any]] = {
     "tenant_account_list": {

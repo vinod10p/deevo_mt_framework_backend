@@ -150,7 +150,9 @@ def test_create_account_portal_user_admin() -> None:
 def test_patch_self_as_member() -> None:
     user_svc = MagicMock()
     user_svc.get_membership.return_value = _active_membership(role="member")
-    user_svc.update_for_account.return_value = minimal_tenant_account_user_detail(first_name="Updated")
+    user_svc.update_for_account.return_value = minimal_tenant_account_user_detail(
+        first_name="Updated"
+    )
     app.dependency_overrides[get_tenant_account_user_service] = lambda: user_svc
 
     client = TestClient(app)

@@ -107,7 +107,7 @@ def _create_tenant_with_owner(
         json={
             "email": owner_email,
             "password": owner_password,
-            "role": "owner",
+            "role": "admin",
             "first_name": "CRM",
             "last_name": "Owner",
         },
@@ -154,7 +154,7 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         me_body = me.json()
         assert me_body["user_scope"] == "tenant"
         assert me_body["tenant_id"] == tenant_id
-        assert me_body["role"] == "owner"
+        assert me_body["role"] == "admin"
         assert me_body["email"] == ctx["owner_email"]
         assert "screen.lead.view" in me_body["permissions"]
         assert "api.auth.role.update" in me_body["permissions"]
@@ -175,7 +175,7 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         one = client.get(f"/api/tenant/users/{owner_user_id}", headers=headers)
         assert one.status_code == 200, one.text
         assert one.json()["email"] == ctx["owner_email"]
-        assert one.json()["role"] == "owner"
+        assert one.json()["role"] == "admin"
 
     finally:
         app.dependency_overrides[get_current_user] = lambda: CurrentUser(

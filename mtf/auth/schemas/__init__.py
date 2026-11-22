@@ -1,5 +1,6 @@
 """Pydantic schemas — auth domain."""
 
+from mtf.auth.schemas.default_member_role import DefaultMemberRoleRead, DefaultMemberRoleUpdate
 from mtf.auth.schemas.default_role_report import (
     DefaultRoleReportCreate,
     DefaultRoleReportRead,
@@ -11,6 +12,7 @@ from mtf.auth.schemas.permission import (
     PermissionRead,
     PermissionResourceType,
     PermissionUpdate,
+    TenantPermissionRead,
 )
 from mtf.auth.schemas.role import RoleCreate, RoleRead, RoleUpdate, TenantRoleCreate
 from mtf.auth.schemas.role_permission import RolePermissionCreate, RolePermissionRead
@@ -36,6 +38,8 @@ from mtf.auth.schemas.user import (
 from mtf.auth.schemas.user_role import UserRoleCreate, UserRoleRead
 
 __all__ = [
+    "DefaultMemberRoleRead",
+    "DefaultMemberRoleUpdate",
     "DefaultRoleReportCreate",
     "DefaultRoleReportRead",
     "DefaultRoleReportUpdate",
@@ -46,6 +50,7 @@ __all__ = [
     "PermissionRead",
     "PermissionResourceType",
     "PermissionUpdate",
+    "TenantPermissionRead",
     "RefreshRequest",
     "RoleCreate",
     "RolePermissionCreate",

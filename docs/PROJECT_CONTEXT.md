@@ -73,6 +73,9 @@ Update statuses as work progresses.
 | 30 | RBAC v3 — tenant assignment CRUD (step 9) | ✅ Done |
 | 31 | RBAC v3 — screen gates prefer RBAC, else `screen_permission` (step 10) | ✅ Done |
 | 32 | `nav/` — `GET /api/nav/modules` and `GET /api/nav/modules/{module_code}/items` | ✅ Done |
+| 33 | RBAC v3 — fail-closed `rbac.screens=on` one-way tenant flag | ✅ Done |
+| 34 | RBAC v3 — React Role Admin prompt (`prompts/auth/ROLE_ADMIN_FRONTEND_PROMPT.md`) | ✅ Done |
+| 35 | RBAC v3 — DeevoFlow tenant Role Admin backend prompt | ✅ Done |
 
 ---
 
@@ -83,7 +86,7 @@ Update statuses as work progresses.
 | Python module | SQL schema | Tables |
 |---------------|-----------|--------|
 | `mtf/shared` | — | config, database, security, deps, exceptions, schemas |
-| `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user`, `permission`, `role`, `role_permission`, `user_role`, `role_report`, `default_role_report` (DDL: [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql)) |
+| `mtf/auth` | `auth` | `app_user`, `session`, `tenant_user`, `tenant_account_user`, `permission`, `role`, `role_permission`, `user_role`, `role_report`, `default_role_report` (DDL: [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql); tenant integrity: [../sql/rbac_fix_01_tenant_integrity.sql](../sql/rbac_fix_01_tenant_integrity.sql); catalog columns: [../sql/rbac_fix_02_permission_catalog.sql](../sql/rbac_fix_02_permission_catalog.sql)) |
 | `mtf/tenant` | `tenant` | `tenant`, `tenant_setting`, `tenant_account`, `tenant_account_address` |
 | `mtf/audit` | `audit` | `audit_log` (append-only) |
 | `mtf/rpt` | `rpt` | `report_definition` (incl. `permission_mode`), `report_column`, `report_criteria`, `report_saved_view`, `report_action`, `report_action_param` — see [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) |
@@ -163,9 +166,15 @@ All frontends call this backend via HTTP at `http://localhost:8000` (and/or thei
 | [REPORTING_FRAMEWORK_CONTEXT.md](REPORTING_FRAMEWORK_CONTEXT.md) | Generic reporting framework design (`rpt`) |
 | [rpt_schema_v5.sql](rpt_schema_v5.sql) | Canonical `rpt` table DDL (V2 additions are in txn_schema_v2.sql) |
 | [txn_schema_v2.sql](txn_schema_v2.sql) | Canonical `txn` table DDL + report permission/action tables |
+| [../sql/auth_rbac_schema_v3.sql](../sql/auth_rbac_schema_v3.sql) | Canonical RBAC v3 tables |
+| [../sql/rbac_fix_01_tenant_integrity.sql](../sql/rbac_fix_01_tenant_integrity.sql) | Additive tenant-integrity FKs and triggers (51000–51010) |
+| [../sql/rbac_fix_02_permission_catalog.sql](../sql/rbac_fix_02_permission_catalog.sql) | Role Admin catalog columns and unique `(user_scope, code)` |
+| [../sql/auth_rbac_seed_tenant_catalog_v1.sql](../sql/auth_rbac_seed_tenant_catalog_v1.sql) | Tenant-grantable CRM / WF / GENERAL permission catalog |
 | [../sql/nav_menu_schema_v1.sql](../sql/nav_menu_schema_v1.sql) | Canonical `nav` table DDL (`menu_module`, `menu_item`) |
 | [../sql/nav_menu_seed_v1.sql](../sql/nav_menu_seed_v1.sql) | Tenant CRM / WF / EMAIL menu rows (lookup reports by key; skip missing) |
 | [../prompts/nav/NAV_FRONTEND_PROMPT.md](../prompts/nav/NAV_FRONTEND_PROMPT.md) | React shell contract — copy into the frontend repo / Cursor chat |
+| [../prompts/auth/DEEVOFLOW_TENANT_ROLE_ADMIN.md](../prompts/auth/DEEVOFLOW_TENANT_ROLE_ADMIN.md) | DeevoFlow backend — mount tenant Role Admin, no wrappers, product tests |
+| [../prompts/auth/ROLE_ADMIN_FRONTEND_PROMPT.md](../prompts/auth/ROLE_ADMIN_FRONTEND_PROMPT.md) | React Role Admin contract — copy into `deevoflow_react` / Cursor chat |
 | [rpt_seed_sample_report.sql](rpt_seed_sample_report.sql) | Grants + five sample system reports (accounts, account summary, addresses, staff users, portal users) and their lookup procs; delete-and-reinsert, re-runnable |
 | [../prompts/rpt/REPORT_API_PROMPT.md](../prompts/rpt/REPORT_API_PROMPT.md) | Report API spec — rules, error codes, endpoints, build order |
 | [../prompts/rpt/REPORT_FRONTEND_PROMPT.md](../prompts/rpt/REPORT_FRONTEND_PROMPT.md) | Report frontend contract — copied into each consuming app |

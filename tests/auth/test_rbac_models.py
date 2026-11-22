@@ -17,6 +17,7 @@ from mtf.auth.models.role_permission import RolePermission
 from mtf.auth.models.role_report import RoleReport
 from mtf.auth.models.user import User
 from mtf.auth.models.user_role import UserRole
+from mtf.tenant.models.tenant_account import TenantAccount
 
 _STANDARD = {
     "id",
@@ -83,6 +84,10 @@ def test_permission_mapping() -> None:
         "action",
         "user_scope",
         "description",
+        "module_code",
+        "resource_name",
+        "sort_order",
+        "is_tenant_grantable",
     }
     assert "UQ_permission_id_user_scope" in _unique_constraint_names(Permission)
 
@@ -104,6 +109,10 @@ def test_role_mapping() -> None:
 
 def test_app_user_exposes_scope_unique_for_user_role_fk() -> None:
     assert "UQ_app_user_id_user_scope" in _unique_constraint_names(User)
+
+
+def test_tenant_account_id_tenant_unique_for_account_fk() -> None:
+    assert "UQ_tenant_account_id_tenant_id" in _unique_constraint_names(TenantAccount)
 
 
 def test_role_permission_composite_foreign_keys() -> None:
@@ -144,8 +153,13 @@ def test_user_role_composite_foreign_keys_and_scope_shape() -> None:
         ("role_id", "user_scope"),
         (("auth.role", "id"), ("auth.role", "user_scope")),
     ) in fks
+    assert (
+        ("account_id", "tenant_id"),
+        (("tenant.tenant_account", "id"), ("tenant.tenant_account", "tenant_id")),
+    ) in fks
     names = {constraint.name for constraint in UserRole.__table__.constraints}
     assert "CK_user_role_scope_shape" in names
+    assert "FK_user_role_account_tenant" in names
 
 
 def test_role_report_mapping() -> None:
@@ -186,6 +200,8 @@ def test_repr_includes_identity() -> None:
         resource_code="lead",
         action="view",
         user_scope="tenant",
+        module_code="GENERAL",
+        resource_name="Lead",
     )
     assert "screen.lead.view" in repr(permission)
     role = Role(

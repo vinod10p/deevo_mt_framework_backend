@@ -120,7 +120,9 @@ def test_tenant_user_master_detail_flow(client: TestClient) -> None:
         delete_membership = client.delete(f"/api/tenant/{tenant_id}/users/{user_id}")
         assert delete_membership.status_code == 204, delete_membership.text
 
-        list_after_delete = client.get(f"/api/tenant/{tenant_id}/users", params={"skip": 0, "limit": 50})
+        list_after_delete = client.get(
+            f"/api/tenant/{tenant_id}/users", params={"skip": 0, "limit": 50}
+        )
         assert list_after_delete.status_code == 200, list_after_delete.text
         assert all(row["user_id"] != user_id for row in list_after_delete.json())
 

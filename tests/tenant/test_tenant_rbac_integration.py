@@ -75,7 +75,7 @@ def _create_tenant_with_owner(client: TestClient) -> dict[str, Any]:
         json={
             "email": owner_email,
             "password": "OwnerSecret123!",
-            "role": "owner",
+            "role": "admin",
             "first_name": "Assign",
             "last_name": "Owner",
         },
@@ -102,6 +102,59 @@ def _login(client: TestClient, *, email: str, password: str, tenant_id: str) -> 
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+def test_member_cannot_manage_roles(client: TestClient) -> None:
+    ctx = _create_tenant_with_owner(client)
+    tenant_id = ctx["tenant_id"]
+    user_ids = [ctx["owner_user_id"]]
+    try:
+        app.dependency_overrides.pop(get_current_user, None)
+        owner_headers = _login(
+            client,
+            email=ctx["owner_email"],
+            password="OwnerSecret123!",
+            tenant_id=tenant_id,
+        )
+        member_email = f"{_unique('asgn-mem2')}@example.com"
+        created = client.post(
+            "/api/tenant/users",
+            headers=owner_headers,
+            json={
+                "email": member_email,
+                "password": "MemberSecret123!",
+                "role": "member",
+                "first_name": "No",
+                "last_name": "Admin",
+            },
+        )
+        assert created.status_code == 201, created.text
+        user_ids.append(created.json()["user_id"])
+        member_headers = _login(
+            client,
+            email=member_email,
+            password="MemberSecret123!",
+            tenant_id=tenant_id,
+        )
+        roles = client.get("/api/tenant/roles", headers=member_headers)
+        assert roles.status_code == 403
+        assert roles.json()["detail"]["code"] == "AUTH_FORBIDDEN"
+        catalog = client.get("/api/tenant/permissions", headers=member_headers)
+        assert catalog.status_code == 403
+        assert catalog.json()["detail"]["code"] == "AUTH_FORBIDDEN"
+        owner_ok = client.get("/api/tenant/permissions", headers=owner_headers)
+        assert owner_ok.status_code == 200, owner_ok.text
+        assert any(row["code"] == "api.auth.role.update" for row in owner_ok.json())
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+            user_id=SEEDED_SYSTEM_USER_ID,
+            user_type="app_user",
+            user_scope="system",
+            tenant_id=None,
+        )
+        client.delete(f"/api/tenant/{tenant_id}")
+        for uid in user_ids:
+            _cleanup_user(uid)
+
+
 def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) -> None:
     ctx = _create_tenant_with_owner(client)
     tenant_id = ctx["tenant_id"]
@@ -123,6 +176,7 @@ def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) ->
         assert roles.status_code == 200, roles.text
         codes = {row["code"] for row in roles.json()}
         assert "tenant_admin" in codes
+        # tenant_member remains a platform template (empty grants) but is unused for members.
         assert "tenant_member" in codes
 
         platform_patch = client.patch(
@@ -133,12 +187,13 @@ def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) ->
         assert platform_patch.status_code == 403
         assert platform_patch.json()["detail"]["code"] == "AUTH_ROLE_FORBIDDEN"
 
-        last_admin = client.delete(
+        # Platform templates are not Role Admin assignable — change membership instead.
+        template_block = client.delete(
             f"/api/tenant/users/{owner_user_id}/roles/{_TENANT_ADMIN_ID}",
             headers=headers,
         )
-        assert last_admin.status_code == 409, last_admin.text
-        assert last_admin.json()["detail"]["code"] == "AUTH_ROLE_CONFLICT"
+        assert template_block.status_code == 409, template_block.text
+        assert template_block.json()["detail"]["code"] == "AUTH_USER_ROLE_CONFLICT"
 
         created_role = client.post(
             "/api/tenant/roles",
@@ -221,6 +276,7 @@ def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) ->
                 "resource_code": f"step9{uuid.uuid4().hex[:8]}",
                 "action": "view",
                 "user_scope": "tenant",
+                "is_tenant_grantable": False,
             },
         )
         assert extra.status_code == 201, extra.text

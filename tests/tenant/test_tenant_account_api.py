@@ -203,5 +203,10 @@ def test_list_get_patch_delete_address() -> None:
 
     assert client.get(f"/api/tenant/accounts/{TEST_ACCOUNT_ID}/addresses").status_code == 200
     assert client.get(url).status_code == 200
-    assert client.patch(url, json={"row_version": "AAAAAAAAAAA=", "address_line1": "Changed"}).status_code == 200
+    assert (
+        client.patch(
+            url, json={"row_version": "AAAAAAAAAAA=", "address_line1": "Changed"}
+        ).status_code
+        == 200
+    )
     assert client.delete(url).status_code == 204

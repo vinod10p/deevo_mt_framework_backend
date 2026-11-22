@@ -13,6 +13,11 @@ Apply in SSMS as deevo_ddl on deevo_app_dev2. If GRANT fails, run the GRANT
 block as dbo. Runtime user deevo_app is SELECT/INSERT/UPDATE/DELETE on these
 tables (they are mutable catalogs, not append-only audit).
 
+Tenant-integrity FKs and triggers: sql/rbac_fix_01_tenant_integrity.sql
+(apply after this script). Permission catalog columns and (user_scope, code)
+unique index: sql/rbac_fix_02_permission_catalog.sql (apply after fix_01).
+Tenant Role Admin catalog seed: sql/auth_rbac_seed_tenant_catalog_v1.sql.
+
 Do not uncomment DROP txn.screen_permission — DeevoFlow Lead still uses it.
 */
 

@@ -50,9 +50,16 @@ def test_tenant_account_columns() -> None:
 
 
 def test_tenant_account_foreign_keys() -> None:
-    targets = {(fk.parent.key, fk.column.table.fullname, fk.column.key) for fk in TenantAccount.__table__.foreign_keys}
+    targets = {
+        (fk.parent.key, fk.column.table.fullname, fk.column.key)
+        for fk in TenantAccount.__table__.foreign_keys
+    }
     assert ("tenant_id", "tenant.tenant", "id") in targets
-    audit = {fk.parent.key for fk in TenantAccount.__table__.foreign_keys if fk.column.table.fullname == "auth.app_user"}
+    audit = {
+        fk.parent.key
+        for fk in TenantAccount.__table__.foreign_keys
+        if fk.column.table.fullname == "auth.app_user"
+    }
     assert audit == {"created_by", "updated_by", "deleted_by"}
 
 

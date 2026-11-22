@@ -97,7 +97,7 @@ def test_hidden_report_is_omitted_and_404_not_403() -> None:
             json={
                 "email": f"{_unique('rbac-rpt')}@example.com",
                 "password": "Secret123!",
-                "role": "owner",
+                "role": "admin",
                 "first_name": "Rbac",
                 "last_name": "Owner",
             },

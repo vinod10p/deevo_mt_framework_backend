@@ -18,8 +18,8 @@ _DT_UTC = DateTime(timezone=False)
 class TenantUser(Base):
     """Membership row linking ``auth.app_user`` to ``tenant.tenant``.
 
-    ``role`` is constrained in the database to
-    ``owner`` | ``admin`` | ``member`` | ``viewer`` (see ``CK_tenant_user_role``).
+    ``role`` is constrained in the database to ``admin`` | ``member``
+    (see ``CK_tenant_user_role``, rbac_fix_05).
     """
 
     __tablename__ = "tenant_user"
@@ -28,13 +28,18 @@ class TenantUser(Base):
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(26), ForeignKey("tenant.tenant.id"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("auth.app_user.id"), nullable=False)
-    #: CK_tenant_user_role: owner | admin | member | viewer
+    #: CK_tenant_user_role: admin | member
     role: Mapped[str] = mapped_column(String(50), nullable=False)
 
     invited_at: Mapped[datetime | None] = mapped_column(_DT_UTC, nullable=True)
     invited_by: Mapped[str | None] = mapped_column(String(26), ForeignKey("auth.app_user.id"), nullable=True)
     invite_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     joined_at: Mapped[datetime | None] = mapped_column(_DT_UTC, nullable=True)
+
+    #: Unused after rbac_fix_05 (members never get a default template). Kept for DB compat.
+    default_member_role_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

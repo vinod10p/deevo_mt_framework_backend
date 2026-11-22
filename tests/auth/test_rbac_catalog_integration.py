@@ -80,6 +80,9 @@ def test_catalog_crud_round_trip(client: TestClient) -> None:
         permission_id = perm["id"]
         expected_code = f"screen.{resource_code}.view"
         assert perm["code"] == expected_code
+        assert perm["module_code"] == "GENERAL"
+        assert perm["resource_name"] == resource_code
+        assert perm["is_tenant_grantable"] is True
         assert perm["is_deleted"] is False
         assert "insert" in _audit_actions("permission", permission_id)
 

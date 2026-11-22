@@ -11,7 +11,7 @@ Companion to [rbac_database_design.md](rbac_database_design.md) and [auth_rbac_s
 - **Keep `tenant_user.role` / `tenant_account_user.role` for now.** Dual-write to `user_role`. Dropping the string column in the first slices would break `require_tenant_role` and `ReportViewAuthorizer`.
 - **Membership string is master** until RBAC owns the gates. Every write to the string column also updates `user_role` in the same transaction.
 - **Reports are the first real enforcement path** in this repo, before DeevoFlow screens and before RBAC CRUD.
-- **Do not DROP `txn.screen_permission`** until no tenant still needs the fallback. Product routes keep calling `require_screen_permission`; that helper now prefers RBAC.
+- **Do not DROP `txn.screen_permission`** until no tenant still needs the fallback. Product routes keep calling `require_screen_permission`; that helper uses RBAC when `rbac.screens=on`.
 - **Platform-wide reports** already exist (`rpt.report_definition.scope_type = 'system'`). Keep `default_role_report`.
 - **System users** have no membership row. They resolve `user_role` where `tenant_id` and `account_id` are null. They cannot call tenant endpoints in v1 (`require_scope("tenant")` already denies). Revisit `api.tenant.support` later if impersonation is needed — no ad-hoc bypass.
 - **Hidden reports:** catalog omits them; GET-by-id and `/run` return **404**, not 403.
@@ -114,11 +114,11 @@ Permission, platform role, `role_permission`, `default_role_report`. Gate with `
 
 ### 9. Assignment CRUD (tenant)
 
-`user_role` and `role_report` (and tenant-created roles / `role_permission`). Escalation and last-admin as above. Cannot edit `is_system` / platform `tenant_id IS NULL` roles. Until RBAC owns these gates, JWT scope + membership string is enough; `api.auth.role.update` is already in the seed.
+`user_role` and `role_report` (and tenant-created roles / `role_permission`). Escalation and last-admin as above. Cannot edit `is_system` / platform `tenant_id IS NULL` roles. Gated with JWT tenant + `require_permission("api.auth.role.update")`.
 
 ### 10. DeevoFlow Lead
 
-Product routes keep `require_screen_permission(screen_key, operation)` so DeevoFlow Lead needs no API rename. `ScreenAccessService` treats a tenant as on RBAC for a screen when live `auth.permission` has `resource_type=screen` and `resource_code=screen_key` **and** the tenant has a live `auth.user_role` row. Then it checks `screen.{key}.{action}` only (`view`→`view`, `add`→`create`, `edit`→`update`, `delete`→`delete`) and returns `403 AUTH_FORBIDDEN`. Otherwise it falls back to `txn.screen_permission` (`403 SCREEN_FORBIDDEN`). Not both-must-pass — an RBAC deny does not consult `screen_permission` or `screen.allow_*`. `GET /api/screens/{screen_key}` uses the same branch for the permissions object. Lead CRUD stays in DeevoFlow.
+Product routes keep `require_screen_permission(screen_key, operation)` so DeevoFlow Lead needs no API rename. `ScreenAccessService` treats a tenant as on RBAC when live `tenant.tenant_setting` has `rbac.screens=on` (set at backfill and `create_tenant`; one-way). Then it checks `screen.{key}.{action}` only (`view`→`view`, `add`→`create`, `edit`→`update`, `delete`→`delete`) and returns `403 AUTH_FORBIDDEN`. Empty grants deny. Otherwise it falls back to `txn.screen_permission` (`403 SCREEN_FORBIDDEN`). Not both-must-pass — an RBAC deny does not consult `screen_permission` or `screen.allow_*`. `GET /api/screens/{screen_key}` uses the same branch for the permissions object. Lead CRUD stays in DeevoFlow.
 
 ## Later
 

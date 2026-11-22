@@ -1,4 +1,4 @@
-"""Tenant-scoped RBAC assignment routes (JWT tenant + owner/admin membership)."""
+"""Tenant-scoped RBAC assignment routes (JWT tenant + ``api.auth.role.update``)."""
 
 from __future__ import annotations
 
@@ -7,18 +7,34 @@ from sqlalchemy.orm import Session
 
 from mtf.audit.api.deps import get_audit_source
 from mtf.audit.service import AuditSource
+from mtf.auth.schemas.permission import TenantPermissionRead
 from mtf.auth.schemas.role import RoleRead, RoleUpdate, TenantRoleCreate
 from mtf.auth.schemas.role_permission import RolePermissionCreate, RolePermissionRead
-from mtf.auth.schemas.role_report import RoleReportCreate, RoleReportRead, RoleReportUpdate
+from mtf.auth.schemas.role_report import (
+    RoleReportCreate,
+    RoleReportRead,
+    RoleReportUpdate,
+    TenantReportCatalogRead,
+)
 from mtf.auth.schemas.user_role import UserRoleCreate, UserRoleRead
+from mtf.auth.services.permission import PermissionService
 from mtf.auth.services.permission_resolver import PermissionResolver
+from mtf.auth.services.rbac_assignment import ADMIN_PERMISSION_CODE
 from mtf.auth.services.role_report import RoleReportService
 from mtf.auth.services.tenant_role import TenantRoleService
 from mtf.auth.services.user_role import UserRoleService
-from mtf.shared.deps import CurrentUser, get_db, get_permission_resolver, get_tenant_id
-from mtf.tenant.api.tenant_staff import require_owner_or_admin
+from mtf.shared.deps import (
+    CurrentUser,
+    get_db,
+    get_permission_resolver,
+    get_tenant_id,
+    require_permission,
+)
 
 router = APIRouter(tags=["tenant-rbac"])
+
+# Module-level so tests can ``app.dependency_overrides[require_role_admin]``.
+require_role_admin = require_permission(ADMIN_PERMISSION_CODE)
 
 
 def get_tenant_role_service(db: Session = Depends(get_db)) -> TenantRoleService:
@@ -33,12 +49,40 @@ def get_role_report_service(db: Session = Depends(get_db)) -> RoleReportService:
     return RoleReportService(db)
 
 
+def get_permission_service(db: Session = Depends(get_db)) -> PermissionService:
+    return PermissionService(db)
+
+
+@router.get("/permissions", response_model=list[TenantPermissionRead])
+def list_tenant_grantable_permissions(
+    _tenant_id: str = Depends(get_tenant_id),
+    _current_user: CurrentUser = Depends(require_role_admin),
+    service: PermissionService = Depends(get_permission_service),
+) -> list[TenantPermissionRead]:
+    return service.list_tenant_grantable()
+
+
+@router.get("/reports", response_model=list[TenantReportCatalogRead])
+def list_tenant_grantable_reports(
+    skip: int = 0,
+    limit: int = 200,
+    tenant_id: str = Depends(get_tenant_id),
+    _current_user: CurrentUser = Depends(require_role_admin),
+    service: RoleReportService = Depends(get_role_report_service),
+) -> list[TenantReportCatalogRead]:
+    """Reports Role Admin may grant — not filtered by the caller's own ``can_view``."""
+    return [
+        TenantReportCatalogRead.model_validate(row)
+        for row in service.list_grantable_reports(tenant_id, skip=skip, limit=limit)
+    ]
+
+
 @router.get("/roles", response_model=list[RoleRead])
 def list_tenant_roles(
     skip: int = 0,
     limit: int = 100,
     tenant_id: str = Depends(get_tenant_id),
-    _current_user: CurrentUser = Depends(require_owner_or_admin),
+    _current_user: CurrentUser = Depends(require_role_admin),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> list[RoleRead]:
     return service.list_roles(tenant_id, skip=skip, limit=limit)
@@ -48,7 +92,7 @@ def list_tenant_roles(
 def create_tenant_role(
     payload: TenantRoleCreate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> RoleRead:
@@ -65,7 +109,7 @@ def create_tenant_role(
 def get_tenant_role(
     role_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    _current_user: CurrentUser = Depends(require_owner_or_admin),
+    _current_user: CurrentUser = Depends(require_role_admin),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> RoleRead:
     return service.get(tenant_id, role_id)
@@ -76,7 +120,7 @@ def update_tenant_role(
     role_id: str,
     payload: RoleUpdate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> RoleRead:
@@ -94,7 +138,7 @@ def update_tenant_role(
 def delete_tenant_role(
     role_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> Response:
@@ -114,7 +158,7 @@ def list_tenant_role_permissions(
     skip: int = 0,
     limit: int = 100,
     tenant_id: str = Depends(get_tenant_id),
-    _current_user: CurrentUser = Depends(require_owner_or_admin),
+    _current_user: CurrentUser = Depends(require_role_admin),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> list[RolePermissionRead]:
     return service.list_permissions(tenant_id, role_id, skip=skip, limit=limit)
@@ -129,7 +173,7 @@ def grant_tenant_role_permission(
     role_id: str,
     payload: RolePermissionCreate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     resolver: PermissionResolver = Depends(get_permission_resolver),
     service: TenantRoleService = Depends(get_tenant_role_service),
@@ -153,7 +197,7 @@ def revoke_tenant_role_permission(
     role_id: str,
     permission_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: TenantRoleService = Depends(get_tenant_role_service),
 ) -> Response:
@@ -174,7 +218,7 @@ def list_tenant_role_reports(
     skip: int = 0,
     limit: int = 100,
     tenant_id: str = Depends(get_tenant_id),
-    _current_user: CurrentUser = Depends(require_owner_or_admin),
+    _current_user: CurrentUser = Depends(require_role_admin),
     service: RoleReportService = Depends(get_role_report_service),
 ) -> list[RoleReportRead]:
     return service.list_for_role(tenant_id, role_id, skip=skip, limit=limit)
@@ -189,7 +233,7 @@ def create_tenant_role_report(
     role_id: str,
     payload: RoleReportCreate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     resolver: PermissionResolver = Depends(get_permission_resolver),
     service: RoleReportService = Depends(get_role_report_service),
@@ -211,7 +255,7 @@ def update_tenant_role_report(
     report_id: str,
     payload: RoleReportUpdate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     resolver: PermissionResolver = Depends(get_permission_resolver),
     service: RoleReportService = Depends(get_role_report_service),
@@ -236,7 +280,7 @@ def delete_tenant_role_report(
     role_id: str,
     report_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: RoleReportService = Depends(get_role_report_service),
 ) -> Response:
@@ -257,7 +301,7 @@ def list_tenant_user_roles(
     skip: int = 0,
     limit: int = 100,
     tenant_id: str = Depends(get_tenant_id),
-    _current_user: CurrentUser = Depends(require_owner_or_admin),
+    _current_user: CurrentUser = Depends(require_role_admin),
     service: UserRoleService = Depends(get_user_role_service),
 ) -> list[UserRoleRead]:
     return service.list_for_user(tenant_id, user_id, skip=skip, limit=limit)
@@ -272,7 +316,7 @@ def assign_tenant_user_role(
     user_id: str,
     payload: UserRoleCreate,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     resolver: PermissionResolver = Depends(get_permission_resolver),
     service: UserRoleService = Depends(get_user_role_service),
@@ -296,7 +340,7 @@ def revoke_tenant_user_role(
     user_id: str,
     role_id: str,
     tenant_id: str = Depends(get_tenant_id),
-    current_user: CurrentUser = Depends(require_owner_or_admin),
+    current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
     service: UserRoleService = Depends(get_user_role_service),
 ) -> Response:

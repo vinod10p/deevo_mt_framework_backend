@@ -42,11 +42,16 @@ def _batches(sql: str) -> list[str]:
 def _apply_seed() -> None:
     sql = Path(SEED_PATH).read_text(encoding="utf-8")
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        for batch in _batches(sql):
-            stripped = batch.lstrip()
-            if stripped.upper().startswith("USE "):
-                continue
-            conn.execute(text(batch))
+        try:
+            for batch in _batches(sql):
+                stripped = batch.lstrip()
+                if stripped.upper().startswith("USE "):
+                    continue
+                conn.execute(text(batch))
+        finally:
+            # Scripts set NOCOUNT ON; a pooled connection that keeps it makes
+            # SQLAlchemy see rowcount -1 (StaleDataError) in later tests.
+            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
 
 
 @pytest.fixture(scope="module")
@@ -77,7 +82,7 @@ def test_seed_inserts_platform_catalog(seeded: None) -> None:
     assert EXPECTED_ROLES <= roles
 
 
-def test_tenant_admin_holds_lead_and_role_update(seeded: None) -> None:
+def test_tenant_admin_holds_role_update_only_from_seed(seeded: None) -> None:
     with SessionLocal() as db:
         admin = db.scalars(
             select(Role).where(Role.tenant_id.is_(None), Role.code == "tenant_admin")
@@ -94,13 +99,12 @@ def test_tenant_admin_holds_lead_and_role_update(seeded: None) -> None:
                 )
             ).all()
         )
-    assert "screen.lead.view" in granted
-    assert "screen.lead.create" in granted
     assert "api.auth.role.update" in granted
+    assert "screen.lead.view" not in granted
     assert "api.system.role.update" not in granted
 
 
-def test_default_report_grant_for_mtf_sample(seeded: None) -> None:
+def test_tenant_admin_has_no_default_report_grants(seeded: None) -> None:
     with SessionLocal() as db:
         report = db.scalars(
             select(ReportDefinition).where(
@@ -121,9 +125,7 @@ def test_default_report_grant_for_mtf_sample(seeded: None) -> None:
                 DefaultRoleReport.is_deleted == False,  # noqa: E712
             )
         ).first()
-    assert grant is not None
-    assert grant.can_view is True
-    assert grant.can_export is True
+    assert grant is None
 
 
 def _live_count(table: str) -> int:

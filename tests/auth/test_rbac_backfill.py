@@ -22,15 +22,14 @@ def test_backfill_requires_seeded_template_roles() -> None:
         assert f"code = '{code}'" in sql
 
 
-def test_backfill_maps_membership_roles() -> None:
+def test_backfill_maps_admin_only_for_tenant() -> None:
     sql = _sql()
-    assert "THEN 'tenant_admin'" in sql
-    assert "THEN 'tenant_member'" in sql
-    assert "THEN 'account_admin'" in sql
-    assert "THEN 'account_member'" in sql
-    assert "WHEN 'owner'" in sql
-    assert "WHEN 'viewer'" in sql
-    assert "THROW 50011" in sql
+    assert "tu.role = 'admin'" in sql
+    assert "r.code = 'tenant_admin'" in sql
+    assert "THEN 'tenant_member'" not in sql
+    assert "WHEN 'owner'" not in sql
+    assert "WHEN 'viewer'" not in sql
+    assert "admin|member" in sql
 
 
 def test_backfill_inserts_only_missing_rows() -> None:
@@ -39,5 +38,6 @@ def test_backfill_inserts_only_missing_rows() -> None:
     assert "auth.role_report" in sql
     assert "auth.user_role" in sql
     assert "auth.default_role_report" in sql
+    assert "rbac.screens" in sql
     assert "01JRACBKF" in sql
     assert "NEWID()" not in sql.upper()

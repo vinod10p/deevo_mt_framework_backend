@@ -18,7 +18,10 @@ class ReportDefinition(Base):
     """Report registry — one row per report (system-wide or tenant-owned)."""
 
     __tablename__ = "report_definition"
-    __table_args__ = {"schema": "rpt"}
+    __table_args__ = (
+        # AFTER UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        {"schema": "rpt", "implicit_returning": False},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     #: CK_report_definition_scope: NULL only when scope_type = 'system'.

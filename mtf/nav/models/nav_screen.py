@@ -29,6 +29,9 @@ class NavScreen(Base):
     description: Mapped[str | None] = mapped_column(Unicode(300), nullable=True)
     #: CK_nav_screen_user_scope: system | tenant | tenant_account
     user_scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: Permission a tenant/portal caller must hold to see this screen in the menu
+    #: (nav_menu_fix_01). NULL hides the screen from them; system callers are not filtered.
+    permission_code: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

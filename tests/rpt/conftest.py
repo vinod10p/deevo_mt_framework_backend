@@ -86,6 +86,16 @@ def live_tenant_staff(*, tenant_id: str | None = None) -> CurrentUser:
     )
 
 
+def sample_report_actor(*, tenant_id: str) -> CurrentUser:
+    """Caller that can open sample reports after thin ``tenant_admin``.
+
+    Platform ``tenant_admin`` no longer carries report grants. Portal
+    ``account_admin`` / ``account_member`` still receive ``default_role_report``
+    copies — use them for sample-report plumbing (run/lookup/catalog shape).
+    """
+    return live_portal_user(tenant_id=tenant_id)
+
+
 def live_portal_user(*, tenant_id: str | None = None) -> CurrentUser:
     """JWT identity for a live ``tenant_account_user`` row."""
     from sqlalchemy import select

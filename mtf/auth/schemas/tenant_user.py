@@ -7,8 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# CK_tenant_user_role in database
-TenantUserRole = Literal["owner", "admin", "member", "viewer"]
+# CK_tenant_user_role in database: admin | member
+TenantUserRole = Literal["admin", "member"]
 
 
 class TenantMembershipCreate(BaseModel):

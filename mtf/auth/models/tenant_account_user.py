@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    LargeBinary,
+    String,
+    text,
+)
 from sqlalchemy.dialects.mssql import ROWVERSION
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import FetchedValue
@@ -18,15 +26,18 @@ class TenantAccountUser(Base):
     """Links ``auth.app_user`` (``user_scope=tenant_account``) to ``tenant.tenant_account``."""
 
     __tablename__ = "tenant_account_user"
-    __table_args__ = {"schema": "auth"}
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["account_id", "tenant_id"],
+            ["tenant.tenant_account.id", "tenant.tenant_account.tenant_id"],
+            name="FK_tenant_account_user_account_tenant",
+        ),
+        {"schema": "auth"},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(26), ForeignKey("tenant.tenant.id"), nullable=False)
-    account_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("tenant.tenant_account.id"),
-        nullable=False,
-    )
+    account_id: Mapped[str] = mapped_column(String(26), nullable=False)
     user_id: Mapped[str] = mapped_column(String(26), ForeignKey("auth.app_user.id"), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'member'"))
 

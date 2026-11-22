@@ -25,7 +25,8 @@ class Role(Base):
     __tablename__ = "role"
     __table_args__ = (
         UniqueConstraint("id", "user_scope", name="UQ_role_id_user_scope"),
-        {"schema": "auth"},
+        # AFTER UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        {"schema": "auth", "implicit_returning": False},
     )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)

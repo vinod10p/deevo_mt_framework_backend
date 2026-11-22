@@ -17,7 +17,8 @@ api.auth.role.update (tenant) and api.system.role.update (system).
 Platform roles (tenant_id NULL, is_system = 1):
   tenant_admin, tenant_member, account_admin, account_member, system_admin
 
-Screen permissions: screen.lead.* (the only txn.screen on deevo_app_dev2).
+Screen permissions: screen.lead.* (minimum). Tenant Role Admin catalog
+(CRM screens, WF menu, module_code): sql/auth_rbac_seed_tenant_catalog_v1.sql.
 Default report grants: the five MTF sample reports, plus crm_lead_list /
 crm_lead_summary when those system reports exist.
 */
@@ -32,42 +33,49 @@ BEGIN TRANSACTION;
 /* -------------------------------------------------------------------------
    1. Permissions — insert by code, then resolve the live id (literal on create)
    ------------------------------------------------------------------------- */
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'screen.lead.view' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.view' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000001', 'screen.lead.view', 'screen', 'lead', 'view', 'tenant',
-            N'Open the Lead screen, list and read records');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'screen.lead.create' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Open the Lead screen, list and read records', 'GENERAL', N'Lead', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.create' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000002', 'screen.lead.create', 'screen', 'lead', 'create', 'tenant',
-            N'Create a Lead');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'screen.lead.update' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Create a Lead', 'GENERAL', N'Lead', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.update' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000003', 'screen.lead.update', 'screen', 'lead', 'update', 'tenant',
-            N'Edit a Lead');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'screen.lead.delete' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Edit a Lead', 'GENERAL', N'Lead', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.delete' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000004', 'screen.lead.delete', 'screen', 'lead', 'delete', 'tenant',
-            N'Delete a Lead');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'screen.lead.export' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Delete a Lead', 'GENERAL', N'Lead', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.export' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000005', 'screen.lead.export', 'screen', 'lead', 'export', 'tenant',
-            N'Export Leads');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'api.auth.role.update' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Export Leads', 'GENERAL', N'Lead', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'tenant' AND code = 'api.auth.role.update' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000006', 'api.auth.role.update', 'api', 'auth.role', 'update', 'tenant',
-            N'Manage tenant roles, grants and assignments');
-IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE code = 'api.system.role.update' AND is_deleted = 0)
-    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description)
+            N'Manage tenant roles, grants and assignments', 'GENERAL', N'Tenant roles', 0, 1);
+IF NOT EXISTS (SELECT 1 FROM auth.permission WHERE user_scope = 'system' AND code = 'api.system.role.update' AND is_deleted = 0)
+    INSERT INTO auth.permission (id, code, resource_type, resource_code, action, user_scope, description,
+                                module_code, resource_name, sort_order, is_tenant_grantable)
     VALUES ('01JRACMTFPM000000000000007', 'api.system.role.update', 'api', 'system.role', 'update', 'system',
-            N'Manage platform roles and the permission catalog');
+            N'Manage platform roles and the permission catalog', 'GENERAL', N'System roles', 0, 0);
 
-DECLARE @P_LEAD_VIEW     varchar(26) = (SELECT id FROM auth.permission WHERE code = 'screen.lead.view' AND is_deleted = 0);
-DECLARE @P_LEAD_CREATE   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'screen.lead.create' AND is_deleted = 0);
-DECLARE @P_LEAD_UPDATE   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'screen.lead.update' AND is_deleted = 0);
-DECLARE @P_LEAD_DELETE   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'screen.lead.delete' AND is_deleted = 0);
-DECLARE @P_LEAD_EXPORT   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'screen.lead.export' AND is_deleted = 0);
-DECLARE @P_TENANT_ROLE   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'api.auth.role.update' AND is_deleted = 0);
-DECLARE @P_SYSTEM_ROLE   varchar(26) = (SELECT id FROM auth.permission WHERE code = 'api.system.role.update' AND is_deleted = 0);
+DECLARE @P_LEAD_VIEW     varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.view' AND is_deleted = 0);
+DECLARE @P_LEAD_CREATE   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.create' AND is_deleted = 0);
+DECLARE @P_LEAD_UPDATE   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.update' AND is_deleted = 0);
+DECLARE @P_LEAD_DELETE   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.delete' AND is_deleted = 0);
+DECLARE @P_LEAD_EXPORT   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'screen.lead.export' AND is_deleted = 0);
+DECLARE @P_TENANT_ROLE   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'tenant' AND code = 'api.auth.role.update' AND is_deleted = 0);
+DECLARE @P_SYSTEM_ROLE   varchar(26) = (SELECT id FROM auth.permission WHERE user_scope = 'system' AND code = 'api.system.role.update' AND is_deleted = 0);
 
 /* -------------------------------------------------------------------------
    2. Platform template roles
@@ -101,34 +109,18 @@ DECLARE @R_SYSTEM_ADMIN   varchar(26) = (SELECT id FROM auth.role WHERE tenant_i
 
 /* -------------------------------------------------------------------------
    3. Role → permission grants
+   tenant_admin is thin (Role Admin only here; admin menus from nav_menu_fix_01).
+   tenant_member has no grants. Lead screen codes stay in the catalog for custom roles.
    ------------------------------------------------------------------------- */
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_LEAD_VIEW AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000001', @R_TENANT_ADMIN, @P_LEAD_VIEW, 'tenant');
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_LEAD_CREATE AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000002', @R_TENANT_ADMIN, @P_LEAD_CREATE, 'tenant');
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_LEAD_UPDATE AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000003', @R_TENANT_ADMIN, @P_LEAD_UPDATE, 'tenant');
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_LEAD_DELETE AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000004', @R_TENANT_ADMIN, @P_LEAD_DELETE, 'tenant');
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_LEAD_EXPORT AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000005', @R_TENANT_ADMIN, @P_LEAD_EXPORT, 'tenant');
 IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_ADMIN AND permission_id = @P_TENANT_ROLE AND is_deleted = 0)
     INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
     VALUES ('01JRACMTFGP000000000000006', @R_TENANT_ADMIN, @P_TENANT_ROLE, 'tenant');
-IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_TENANT_MEMBER AND permission_id = @P_LEAD_VIEW AND is_deleted = 0)
-    INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
-    VALUES ('01JRACMTFGP000000000000007', @R_TENANT_MEMBER, @P_LEAD_VIEW, 'tenant');
 IF NOT EXISTS (SELECT 1 FROM auth.role_permission WHERE role_id = @R_SYSTEM_ADMIN AND permission_id = @P_SYSTEM_ROLE AND is_deleted = 0)
     INSERT INTO auth.role_permission (id, role_id, permission_id, user_scope)
     VALUES ('01JRACMTFGP000000000000008', @R_SYSTEM_ADMIN, @P_SYSTEM_ROLE, 'system');
 
 /* -------------------------------------------------------------------------
-   4. default_role_report — skip a report_key that is not seeded yet
+   4. default_role_report — portal account templates only (tenant templates empty)
    ------------------------------------------------------------------------- */
 DECLARE @Grant TABLE (
     id         varchar(26) NOT NULL PRIMARY KEY,
@@ -139,20 +131,6 @@ DECLARE @Grant TABLE (
 );
 
 INSERT INTO @Grant (id, role_id, report_key, can_view, can_export) VALUES
-    ('01JRACMTFDR000000000000001', @R_TENANT_ADMIN,   'tenant_account_list',         1, 1),
-    ('01JRACMTFDR000000000000002', @R_TENANT_ADMIN,   'tenant_account_summary',      1, 1),
-    ('01JRACMTFDR000000000000003', @R_TENANT_ADMIN,   'tenant_account_address_list', 1, 1),
-    ('01JRACMTFDR000000000000004', @R_TENANT_ADMIN,   'tenant_user_list',            1, 1),
-    ('01JRACMTFDR000000000000005', @R_TENANT_ADMIN,   'portal_user_list',            1, 1),
-    ('01JRACMTFDR000000000000006', @R_TENANT_ADMIN,   'crm_lead_list',               1, 1),
-    ('01JRACMTFDR000000000000007', @R_TENANT_ADMIN,   'crm_lead_summary',            1, 1),
-    ('01JRACMTFDR000000000000008', @R_TENANT_MEMBER,  'tenant_account_list',         1, 0),
-    ('01JRACMTFDR000000000000009', @R_TENANT_MEMBER,  'tenant_account_summary',      1, 0),
-    ('01JRACMTFDR00000000000000A', @R_TENANT_MEMBER,  'tenant_account_address_list', 1, 0),
-    ('01JRACMTFDR00000000000000B', @R_TENANT_MEMBER,  'tenant_user_list',            1, 0),
-    ('01JRACMTFDR00000000000000C', @R_TENANT_MEMBER,  'portal_user_list',            1, 0),
-    ('01JRACMTFDR00000000000000D', @R_TENANT_MEMBER,  'crm_lead_list',               1, 0),
-    ('01JRACMTFDR00000000000000E', @R_TENANT_MEMBER,  'crm_lead_summary',            1, 0),
     ('01JRACMTFDR00000000000000F', @R_ACCOUNT_ADMIN,  'tenant_account_list',         1, 1),
     ('01JRACMTFDR00000000000000G', @R_ACCOUNT_ADMIN,  'tenant_account_summary',      1, 1),
     ('01JRACMTFDR00000000000000H', @R_ACCOUNT_ADMIN,  'tenant_account_address_list', 1, 1),

@@ -129,4 +129,3 @@ def test_get_tenant_by_subdomain_public_integration(client: TestClient) -> None:
         assert body["is_active"] is True
     finally:
         client.delete(f"/api/tenant/{tenant_id}")
-

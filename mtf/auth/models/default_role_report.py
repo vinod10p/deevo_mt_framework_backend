@@ -18,12 +18,15 @@ class DefaultRoleReport(Base):
     """Platform default report grants — table ``auth.default_role_report``.
 
     Not read at runtime. Copied into ``auth.role_report`` when a tenant is
-    created. ``role_id`` must be a platform template role and ``report_id`` a
-    system-wide report — those are service rules, not database constraints.
+    created.     ``role_id`` must be a platform template role and ``report_id`` a
+    system-wide report (``TR_default_role_report_integrity``).
     """
 
     __tablename__ = "default_role_report"
-    __table_args__ = {"schema": "auth"}
+    __table_args__ = (
+        # AFTER INSERT/UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        {"schema": "auth", "implicit_returning": False},
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     role_id: Mapped[str] = mapped_column(

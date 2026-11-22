@@ -139,8 +139,20 @@ list response.
 | `AUTH_UNAUTHORIZED` | 401 | missing / bad / expired JWT | existing refresh / login redirect |
 | `NAV_MODULE_NOT_FOUND` | 404 | unknown code, inactive, deleted, or other scope's module | stay on previous module; toast "Module not found" |
 
-Empty catalog is **200** `{ "modules": [], "version": "1970-01-01T00:00:00.000Z" }` — not 404.
-Empty submenu is **200** `{ "items": [] }` for a live module.
+**The menu is per user.** The server returns only what the signed-in user may open:
+
+- a `report` item appears only if the user can view that report (a role report grant);
+- a `screen` item appears only if the user holds that screen's permission (for example
+  `menu.wf_inbox.view`, `screen.note.view`);
+- a `group` appears only with at least one visible child;
+- a module is listed only if at least one of its items is visible.
+
+So two users in the same tenant can get different modules and items, and a user whose roles
+grant nothing menu-related gets **200** `{ "modules": [], "version": "1970-01-01T00:00:00.000Z" }`.
+Render that as an empty sidebar. Do not filter the menu again in React, and do not hard-code
+modules. Refetch `nav` after login, logout, and any change to the signed-in user's roles.
+A module that is not in the list returns **404 `NAV_MODULE_NOT_FOUND`** from its items route,
+the same as an unknown module.
 
 ---
 
@@ -161,7 +173,7 @@ Empty submenu is **200** `{ "items": [] }` for a live module.
 
 | Field | Use |
 |---|---|
-| `version` | Cache hint. Include it in the React Query key's data; if you store the last version, you may skip a refetch when it matches. Do not send it back. |
+| `version` | Catalog version (newest menu row), **not** the user's permissions. Do not skip a refetch because it matches; role and report grants can change the list without changing it. Do not send it back. |
 | `modules[].code` | Selected-module key and path for API 2. React key. |
 | `modules[].name` | Button / tab label. **Never** hard-code "CRM". |
 | `modules[].icon` | Map to a lucide (or app) icon. Unknown or `null` → default (e.g. `LayoutGrid`). |
@@ -409,7 +421,7 @@ Wire `ModuleStrip` + `ModuleSidebar` into `AppLayout` / `Sidebar`. Keep mobile `
 ## 8. Not in the API / not this work
 
 - Sending `tenant_id`, `user_id`, `T`/`P`, or `user_scope`
-- Filtering the menu with `GET /auth/me` `reports[]` / `permissions[]`
+- Filtering the menu with `GET /auth/me` `reports[]` / `permissions[]` (the server already does)
 - Portal-specific modules (empty list is correct today)
 - Admin CRUD for menu rows
 - A single `GET /nav/menu` tree

@@ -1,12 +1,10 @@
 """Dual-write membership.role → auth.user_role, and copy default report grants.
 
-``tenant_user.role`` / ``tenant_account_user.role`` stay master until RBAC owns
-the gates. Every membership write must call these helpers in the same
-transaction. Missing platform template roles fail the write.
-
-Sync only swaps the platform template role for the membership string; custom
-roles assigned through the RBAC API are left alone. Revoke (membership removed)
-still soft-deletes every assignment in that place.
+``tenant_user.role`` is ``admin`` | ``member``. Admin gets the thin platform
+``tenant_admin`` template (Users, Portal Accounts, Role Admin). Member gets no
+template — only roles assigned through Role Admin. Custom roles survive sync.
+Portal account membership still maps to ``account_admin`` / ``account_member``.
+Revoke (membership removed) soft-deletes every assignment in that place.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from mtf.audit.service import (
@@ -27,6 +25,7 @@ from mtf.audit.service import (
 from mtf.auth.models.default_role_report import DefaultRoleReport
 from mtf.auth.models.role import Role
 from mtf.auth.models.role_report import RoleReport
+from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user_role import UserRole
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict
@@ -35,16 +34,16 @@ from mtf.shared.security import generate_id
 T = TypeVar("T")
 
 #: Membership string → platform ``auth.role.code`` (tenant_id NULL).
+#: Tenant ``member`` has no template (empty string means template_enabled=False).
 TENANT_MEMBERSHIP_ROLE_MAP: dict[str, str] = {
-    "owner": "tenant_admin",
     "admin": "tenant_admin",
-    "member": "tenant_member",
-    "viewer": "tenant_member",
 }
 ACCOUNT_MEMBERSHIP_ROLE_MAP: dict[str, str] = {
     "admin": "account_admin",
     "member": "account_member",
 }
+ADMIN_TEMPLATE_CODE = "tenant_admin"
+MEMBER_TEMPLATE_CODE = "tenant_member"  # kept only so sync can retire old rows
 
 
 def _utc_naive_now() -> datetime:
@@ -65,8 +64,18 @@ def _first_orm(result: object, model: type[T]) -> T | None:
     return row if isinstance(row, model) else None
 
 
-def template_role_code(*, user_scope: str, membership_role: str) -> str:
+def lock_membership(stmt: Select[tuple[TenantUser]]) -> Select[tuple[TenantUser]]:
+    """``UPDLOCK, ROWLOCK`` on ``auth.tenant_user`` and reload the row."""
+    return stmt.with_hint(
+        TenantUser, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql"
+    ).execution_options(populate_existing=True)
+
+
+def template_role_code(*, user_scope: str, membership_role: str) -> str | None:
+    """Platform role code for this membership, or ``None`` when no template applies."""
     if user_scope == "tenant":
+        if membership_role == "member":
+            return None
         mapped = TENANT_MEMBERSHIP_ROLE_MAP.get(membership_role)
     elif user_scope == "tenant_account":
         mapped = ACCOUNT_MEMBERSHIP_ROLE_MAP.get(membership_role)
@@ -173,10 +182,17 @@ def sync_tenant_user_role(
     user_id: str,
     membership_role: str,
     is_active: bool = True,
+    default_member_role_enabled: bool = True,
     actor_id: str | None = None,
     actor: CurrentUser | None = None,
     source: AuditSource | None = None,
 ) -> None:
+    """Make the user's template role match the membership string.
+
+    ``default_member_role_enabled`` is ignored (kept for call-site compatibility).
+    Members never get a template; admins always get ``tenant_admin``.
+    """
+    del default_member_role_enabled
     _sync_assignment(
         db,
         tenant_id=tenant_id,
@@ -185,6 +201,7 @@ def sync_tenant_user_role(
         user_scope="tenant",
         membership_role=membership_role,
         is_active=is_active,
+        template_enabled=membership_role == "admin",
         actor_id=actor_id,
         actor=actor,
         source=source,
@@ -211,6 +228,7 @@ def sync_account_user_role(
         user_scope="tenant_account",
         membership_role=membership_role,
         is_active=is_active,
+        template_enabled=True,
         actor_id=actor_id,
         actor=actor,
         source=source,
@@ -277,7 +295,8 @@ def _place_filters(
 
 def _template_codes(user_scope: str) -> frozenset[str]:
     if user_scope == "tenant":
-        return frozenset(TENANT_MEMBERSHIP_ROLE_MAP.values())
+        # Include retired tenant_member so sync can soft-delete leftover rows.
+        return frozenset({ADMIN_TEMPLATE_CODE, MEMBER_TEMPLATE_CODE})
     return frozenset(ACCOUNT_MEMBERSHIP_ROLE_MAP.values())
 
 
@@ -320,12 +339,17 @@ def _sync_assignment(
     user_scope: str,
     membership_role: str,
     is_active: bool,
+    template_enabled: bool,
     actor_id: str | None,
     actor: CurrentUser | None,
     source: AuditSource | None,
 ) -> None:
     code = template_role_code(user_scope=user_scope, membership_role=membership_role)
-    role = require_platform_role(db, code=code, user_scope=user_scope)
+    role: Role | None = None
+    if template_enabled:
+        if code is None:
+            conflict("AUTH_ROLE", f"No platform template for membership {membership_role!r}")
+        role = require_platform_role(db, code=code, user_scope=user_scope)
     live = _live_assignments(
         db,
         tenant_id=tenant_id,
@@ -335,7 +359,7 @@ def _sync_assignment(
     )
     keep: UserRole | None = None
     for row in live:
-        if row.role_id == role.id:
+        if role is not None and row.role_id == role.id and keep is None:
             keep = row
             continue
         _soft_delete_assignment(
@@ -345,6 +369,8 @@ def _sync_assignment(
             actor=actor,
             source=source,
         )
+    if role is None:
+        return
     if keep is None:
         assignment = UserRole(
             id=generate_id(),

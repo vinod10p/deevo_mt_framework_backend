@@ -5,7 +5,15 @@ from mtf.tenant.models.mailbox_credential import MailboxCredential
 from mtf.tenant.models.tenant import Tenant
 from mtf.tenant.models.tenant_account import TenantAccount
 from mtf.tenant.models.tenant_account_address import TenantAccountAddress
+from mtf.tenant.models.tenant_setting import TenantSetting
 
-__all__ = ["Mailbox", "MailboxCredential", "Tenant", "TenantAccount", "TenantAccountAddress"]
+__all__ = [
+    "Mailbox",
+    "MailboxCredential",
+    "Tenant",
+    "TenantAccount",
+    "TenantAccountAddress",
+    "TenantSetting",
+]
 
 

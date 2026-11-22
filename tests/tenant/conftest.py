@@ -18,6 +18,7 @@ def clear_app_dependency_overrides() -> None:
     yield
     app.dependency_overrides.clear()
 
+
 _NOW = datetime(2026, 5, 9, 12, 0, 0)
 _ROW_VER = bytes(range(8))
 

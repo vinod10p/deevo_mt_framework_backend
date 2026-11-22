@@ -140,7 +140,7 @@ BEGIN
 END
 GO
 
--- values mirror CK_tenant_user_role
+-- values mirror CK_tenant_user_role (admin | member)
 CREATE OR ALTER PROCEDURE rpt.usp_lookup_tenant_user_role
     @SearchText nvarchar(200) = NULL,
     @Values     nvarchar(max) = NULL,
@@ -151,10 +151,8 @@ BEGIN
 
     SELECT TOP (@MaxRows + 1) v.value, v.label
     FROM (VALUES
-        (N'owner',  N'Owner',  1),
-        (N'admin',  N'Admin',  2),
-        (N'member', N'Member', 3),
-        (N'viewer', N'Viewer', 4)
+        (N'admin',  N'Admin',  1),
+        (N'member', N'Member', 2)
     ) AS v(value, label, sort_order)
     WHERE (@SearchText IS NULL OR v.label LIKE N'%' + @SearchText + N'%')
       AND (@Values IS NULL OR v.value IN (SELECT j.[value] FROM OPENJSON(@Values) AS j))
@@ -344,7 +342,7 @@ END
 GO
 
 -- 4. tenant_user_list — staff users of the current tenant
--- {"role": ["owner","admin"], "is_active": true,
+-- {"role": ["admin","member"], "is_active": true,
 --  "joined_date": {"from": "2026-01-01", "to": "2026-12-31"}}
 CREATE OR ALTER PROCEDURE rpt.usp_tenant_user_list
     @CriteriaJson nvarchar(max),
