@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -11,12 +12,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mtf.auth.models.session import AuthSession
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user import User
 from mtf.shared.database import SessionLocal
 from mtf.shared.exceptions import forbidden, unauthorized
-from mtf.shared.security import decode_token
+from mtf.shared.security import decode_access_token, hash_token
 
 if TYPE_CHECKING:
     from mtf.auth.services.permission_resolver import PermissionResolver
@@ -66,10 +68,15 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
     db: Session = Depends(get_db),
 ) -> CurrentUser:
-    """Decode JWT, then verify ``auth.app_user`` exists, is active, and not deleted."""
+    """Validate the Bearer access token against its live session and membership.
+
+    401 unless: signature/expiry valid, ``typ="access"``, known ``user_type`` /
+    ``user_scope``, ``sid`` names an active session whose current token this is, the
+    user is active, and (tenant / portal scope) the membership is still active.
+    """
     token = credentials.credentials
     try:
-        claims = decode_token(token)
+        claims = decode_access_token(token)
     except ValueError as exc:
         msg = str(exc)
         if msg == "TOKEN_EXPIRED":
@@ -79,28 +86,38 @@ def get_current_user(
     user_id = claims.get("user_id")
     if not user_id or not isinstance(user_id, str):
         unauthorized("AUTH", "Invalid token")
+    session_id = claims.get("sid")
+    if not session_id or not isinstance(session_id, str):
+        # Tokens issued before ``sid`` existed (or not by login/refresh) — client refreshes.
+        unauthorized("AUTH", "Invalid token")
 
+    # Unknown values are a malformed token — never guess a scope or type.
+    user_type = claims.get("user_type")
+    if user_type not in ("app_user", "customer_user"):
+        unauthorized("AUTH", "Invalid token")
+    user_scope = claims.get("user_scope")
+    if user_scope not in ("system", "tenant", "tenant_account"):
+        unauthorized("AUTH", "Invalid token")
+
+    # One PK lookup: the session is live, this is its *current* access token (refresh
+    # rotation and logout both invalidate older ones), and the user is still active.
     stmt = (
-        select(User.id)
+        select(AuthSession.token_hash)
+        .join(User, User.id == AuthSession.user_id)
         .where(
-            User.id == user_id,
+            AuthSession.id == session_id,
+            AuthSession.user_id == user_id,
+            AuthSession.is_active == True,  # noqa: E712
+            AuthSession.is_deleted == False,  # noqa: E712
+            AuthSession.revoked_at.is_(None),
             User.is_deleted == False,  # noqa: E712
             User.is_active == True,  # noqa: E712
         )
         .limit(1)
     )
-    if db.scalars(stmt).first() is None:
-        unauthorized("AUTH", "User not found or inactive")
-
-    raw_type = claims.get("user_type")
-    user_type: UserType = (
-        raw_type if raw_type in ("app_user", "customer_user") else "app_user"
-    )
-
-    raw_scope = claims.get("user_scope")
-    user_scope: UserScope = (
-        raw_scope if raw_scope in ("system", "tenant", "tenant_account") else "tenant"
-    )
+    current_hash = db.scalars(stmt).first()
+    if current_hash is None or not hmac.compare_digest(current_hash, hash_token(token)):
+        unauthorized("AUTH", "Session expired or revoked")
 
     tenant_raw = claims.get("tenant_id")
     tenant_id: str | None = tenant_raw if isinstance(tenant_raw, str) else None
@@ -108,13 +125,23 @@ def get_current_user(
     account_raw = claims.get("account_id")
     account_id: str | None = account_raw if isinstance(account_raw, str) else None
 
-    return CurrentUser(
+    current = CurrentUser(
         user_id=user_id,
         user_type=user_type,
         user_scope=user_scope,
         tenant_id=tenant_id,
         account_id=account_id,
     )
+
+    # Removed / deactivated members lose access immediately, not when the JWT expires.
+    if user_scope == "tenant" and tenant_id is not None:
+        if tenant_membership_role(db, current) is None:
+            unauthorized("AUTH", "Membership inactive")
+    elif user_scope == "tenant_account" and tenant_id is not None and account_id is not None:
+        if account_membership_role(db, current) is None:
+            unauthorized("AUTH", "Membership inactive")
+
+    return current
 
 
 _scope_checkers: dict[UserScope, Callable[..., CurrentUser]] = {}
@@ -186,6 +213,41 @@ def get_account_id(
     return user.account_id
 
 
+def tenant_membership_role(db: Session, user: CurrentUser) -> str | None:
+    """Role of the caller's active ``auth.tenant_user`` row for the JWT tenant, or None."""
+    if user.tenant_id is None:
+        return None
+    stmt = (
+        select(TenantUser.role)
+        .where(
+            TenantUser.tenant_id == user.tenant_id,
+            TenantUser.user_id == user.user_id,
+            TenantUser.is_deleted == False,  # noqa: E712
+            TenantUser.is_active == True,  # noqa: E712
+        )
+        .limit(1)
+    )
+    return db.scalars(stmt).first()
+
+
+def account_membership_role(db: Session, user: CurrentUser) -> str | None:
+    """Role of the caller's active ``tenant_account_user`` row for the JWT account, or None."""
+    if user.tenant_id is None or user.account_id is None:
+        return None
+    stmt = (
+        select(TenantAccountUser.role)
+        .where(
+            TenantAccountUser.tenant_id == user.tenant_id,
+            TenantAccountUser.account_id == user.account_id,
+            TenantAccountUser.user_id == user.user_id,
+            TenantAccountUser.is_deleted == False,  # noqa: E712
+            TenantAccountUser.is_active == True,  # noqa: E712
+        )
+        .limit(1)
+    )
+    return db.scalars(stmt).first()
+
+
 _tenant_role_checkers: dict[tuple[str, ...], Callable[..., CurrentUser]] = {}
 
 
@@ -204,17 +266,7 @@ def require_tenant_role(*roles: str) -> Callable[..., CurrentUser]:
     ) -> CurrentUser:
         if user.tenant_id is None:
             forbidden("AUTH", "Tenant context required")
-        stmt = (
-            select(TenantUser.role)
-            .where(
-                TenantUser.tenant_id == user.tenant_id,
-                TenantUser.user_id == user.user_id,
-                TenantUser.is_deleted == False,  # noqa: E712
-                TenantUser.is_active == True,  # noqa: E712
-            )
-            .limit(1)
-        )
-        role = db.scalars(stmt).first()
+        role = tenant_membership_role(db, user)
         if role is None or role not in allowed:
             forbidden("AUTH", "Insufficient permissions")
         return user
@@ -271,19 +323,7 @@ def require_portal_account_admin() -> Callable[..., CurrentUser]:
     ) -> CurrentUser:
         if user.tenant_id is None or user.account_id is None:
             forbidden("AUTH", "Account context required")
-        stmt = (
-            select(TenantAccountUser.role)
-            .where(
-                TenantAccountUser.tenant_id == user.tenant_id,
-                TenantAccountUser.account_id == user.account_id,
-                TenantAccountUser.user_id == user.user_id,
-                TenantAccountUser.is_deleted == False,  # noqa: E712
-                TenantAccountUser.is_active == True,  # noqa: E712
-            )
-            .limit(1)
-        )
-        role = db.scalars(stmt).first()
-        if role != "admin":
+        if account_membership_role(db, user) != "admin":
             forbidden("AUTH", "Insufficient permissions")
         return user
 

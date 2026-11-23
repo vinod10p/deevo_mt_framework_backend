@@ -18,6 +18,10 @@ Git checkout -b v4.0
 
 Git push -u origin v4.0
 
+-- edit pyproject.toml and update verison
+-- run uv lock
+-- commit 
+-- merge to main
 
 Step	Command	Description
 1	git checkout main	Switch to main branch

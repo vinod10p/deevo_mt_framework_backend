@@ -143,7 +143,7 @@ def test_refresh_does_not_write_audit() -> None:
     service = SessionService(db)
     with (
         patch.object(service, "_get_session_by_refresh_hash", return_value=session),
-        patch("mtf.auth.services.session_service.decode_token", return_value={
+        patch("mtf.auth.services.session_service.decode_refresh_token", return_value={
             "session_id": session.id, "user_id": session.user_id,
         }),
         patch.object(service, "_get_active_user_by_id", return_value=user),

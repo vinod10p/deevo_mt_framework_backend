@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import base64
-import json
+import logging
 import urllib.parse
 from datetime import datetime, timedelta, timezone
+from typing import Never
 
 import httpx
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ulid import ULID
@@ -22,9 +21,27 @@ from mtf.audit.service import (
 )
 from mtf.shared.config import get_settings
 from mtf.shared.deps import CurrentUser
+from mtf.shared.exceptions import bad_request
+from mtf.shared.security import create_mailbox_oauth_state, decode_mailbox_oauth_state
 from mtf.tenant.models.mailbox import Mailbox
 from mtf.tenant.models.mailbox_credential import MailboxCredential
 from mtf.tenant.schemas.mailbox import MailboxCreate, MailboxUpdate
+
+logger = logging.getLogger(__name__)
+
+GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
+MAILBOX_OAUTH_FAILED_MESSAGE = (
+    "Mailbox authorization failed. Please start again from the admin app."
+)
+MAILBOX_TOKEN_REFRESH_FAILED_MESSAGE = (
+    "Mailbox access has expired or was revoked. Please re-authorize the mailbox."
+)
+
+
+def _oauth_fail(log_message: str) -> Never:
+    """Log the real reason; return one generic 400 to the browser."""
+    logger.warning("Mailbox OAuth callback: %s", log_message)
+    bad_request("MAILBOX_OAUTH", MAILBOX_OAUTH_FAILED_MESSAGE)
 
 
 class MailboxService:
@@ -160,10 +177,10 @@ class MailboxService:
     # Microsoft OAuth 2.0 Authorization & Token Management
     # ---------------------------------------------------------------------------
 
-    def get_authorization_url(self, tenant_id: str, mailbox_id: str) -> str:
-        """Generate the Microsoft OAuth2 authorization URL."""
-        state_dict = {"tenant_id": tenant_id, "mailbox_id": mailbox_id}
-        state_str = base64.urlsafe_b64encode(json.dumps(state_dict).encode()).decode()
+    def get_authorization_url(self, tenant_id: str, mailbox_id: str, initiated_by: str) -> str:
+        """Microsoft OAuth2 authorization URL with a signed ``state`` (see
+        :func:`create_mailbox_oauth_state`) bound to this mailbox and the calling admin."""
+        state_str = create_mailbox_oauth_state(tenant_id, mailbox_id, initiated_by)
 
         params = {
             "client_id": self._settings.microsoft_client_id,
@@ -178,11 +195,23 @@ class MailboxService:
         query_string = urllib.parse.urlencode(params)
         return f"{self._settings.microsoft_authority}/oauth2/v2.0/authorize?{query_string}"
 
-    def process_oauth_callback(self, tenant_id: str, mailbox_id: str, code: str) -> MailboxCredential | None:
-        """Exchange authorization code for access + refresh tokens and persist in email.mailbox_credential."""
+    def process_oauth_callback(self, state: str, code: str) -> MailboxCredential:
+        """Verify ``state``, exchange ``code``, check the tokens can open this mailbox, persist.
+
+        Every failure raises ``400 MAILBOX_OAUTH_BAD_REQUEST`` with a generic message;
+        details (including Microsoft's response) are logged only.
+        """
+        try:
+            flow = decode_mailbox_oauth_state(state)
+        except ValueError as exc:
+            _oauth_fail(f"rejected state: {exc}")
+        tenant_id = flow["tenant_id"]
+        mailbox_id = flow["mailbox_id"]
+        initiated_by = flow["initiated_by"]
+
         mailbox = self.get_by_id(tenant_id, mailbox_id)
         if not mailbox:
-            return None
+            _oauth_fail(f"mailbox {mailbox_id} not found for tenant {tenant_id}")
 
         client_secret = self._settings.microsoft_client_secret.get_secret_value()
         token_url = f"{self._settings.microsoft_authority}/oauth2/v2.0/token"
@@ -197,12 +226,29 @@ class MailboxService:
 
         response = httpx.post(token_url, data=data, timeout=15)
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail=f"Microsoft Token Error: {response.text}")
+            _oauth_fail(f"token exchange failed ({response.status_code}): {response.text}")
 
         token_data = response.json()
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
         expires_in = token_data.get("expires_in", 3600)
+        if not access_token or not refresh_token:
+            _oauth_fail("token response missing access_token or refresh_token")
+
+        # The consenting Microsoft account must actually be able to open *this* mailbox —
+        # otherwise anyone could bind their own account's tokens to another mailbox record.
+        mailbox_url = (
+            f"{GRAPH_API_BASE}/users/{urllib.parse.quote(mailbox.email_address, safe='@')}"
+            "/mailFolders/inbox?$select=id"
+        )
+        check = httpx.get(
+            mailbox_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15
+        )
+        if check.status_code != 200:
+            _oauth_fail(
+                f"consented account cannot open mailbox {mailbox.email_address} "
+                f"({check.status_code}): {check.text}"
+            )
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         expires_at = now + timedelta(seconds=int(expires_in))
@@ -214,7 +260,7 @@ class MailboxService:
             MailboxCredential.is_deleted == False,
         )
         cred = self._session.scalars(stmt).first()
-        user_id = mailbox.created_by or "01HYSTEM00000000000000000"
+        user_id = initiated_by
 
         if not cred:
             cred_id = str(ULID())
@@ -281,15 +327,22 @@ class MailboxService:
         }
 
         response = httpx.post(token_url, data=data, timeout=15)
-        if response.status_code != 200:
+        token_data = response.json() if response.status_code == 200 else {}
+        new_access_token = token_data.get("access_token")
+        if not new_access_token:
+            # Microsoft's text stays server-side (DB + log); callers get a generic error.
             cred.credential_status = "error"
             cred.last_error = response.text
             cred.last_error_at = now
             self._session.commit()
-            raise HTTPException(status_code=400, detail=f"Failed to refresh token: {response.text}")
+            logger.warning(
+                "Mailbox token refresh failed for mailbox %s (%s): %s",
+                mailbox_id,
+                response.status_code,
+                response.text,
+            )
+            bad_request("MAILBOX_TOKEN", MAILBOX_TOKEN_REFRESH_FAILED_MESSAGE)
 
-        token_data = response.json()
-        new_access_token = token_data.get("access_token")
         new_refresh_token = token_data.get("refresh_token", cred.refresh_token)
         expires_in = token_data.get("expires_in", 3600)
 

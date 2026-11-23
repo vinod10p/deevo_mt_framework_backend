@@ -8,8 +8,10 @@ from mtf.audit.api.deps import get_audit_source
 from mtf.audit.service import AuditSource
 from mtf.auth.services import TenantAccountUserService, TenantUserService
 from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination, require_scope
+from mtf.shared.config import get_settings
 from mtf.shared.exceptions import raise_if_not_found
 from mtf.tenant.schemas import (
+    MailboxAuthorizeRead,
     MailboxCreate,
     MailboxRead,
     MailboxUpdate,
@@ -336,43 +338,41 @@ def mailbox_oauth_callback(
     state: str = Query(...),
     service: MailboxService = Depends(get_mailbox_service),
 ) -> RedirectResponse:
-    import base64
-    import json
+    """Microsoft redirect target — unauthenticated by design.
 
-    try:
-        state_decoded = base64.urlsafe_b64decode(state.encode()).decode()
-        state_dict = json.loads(state_decoded)
-        tenant_id = state_dict.get("tenant_id")
-        mailbox_id = state_dict.get("mailbox_id")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
-
-    if not tenant_id or not mailbox_id:
-        raise HTTPException(status_code=400, detail="State missing required fields")
-
-    cred = service.process_oauth_callback(tenant_id, mailbox_id, code)
-    if not cred:
-        raise HTTPException(status_code=400, detail="Failed to verify mailbox and exchange tokens")
-
-    # Redirect to Streamlit frontend Verification page
-    frontend_url = "http://localhost:8001/verification"
-    return RedirectResponse(url=frontend_url)
+    Trust comes from the signed ``state`` (issued by ``/authorize`` to a system admin)
+    and from the service checking the returned tokens can open this mailbox.
+    """
+    service.process_oauth_callback(state, code)
+    return RedirectResponse(url=get_settings().mailbox_oauth_success_url)
 
 
 
 
-@router.get("/{tenant_id}/mailboxes/{mailbox_id}/authorize")
+@router.get(
+    "/{tenant_id}/mailboxes/{mailbox_id}/authorize",
+    response_model=MailboxAuthorizeRead,
+)
 def authorize_mailbox_oauth(
     tenant_id: str,
     mailbox_id: str,
+    current_user: CurrentUser = Depends(require_scope("system")),
     service: MailboxService = Depends(get_mailbox_service),
-) -> RedirectResponse:
+) -> MailboxAuthorizeRead:
+    """Microsoft consent URL for this mailbox (system admins only).
+
+    Returned as JSON rather than a redirect: a browser link cannot carry the Bearer
+    token, so the admin app fetches this and then opens ``authorization_url``.
+    """
     mailbox = service.get_by_id(tenant_id, mailbox_id)
     if not mailbox:
-        raise HTTPException(status_code=404, detail="Mailbox not found")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "MAILBOX_NOT_FOUND", "message": "Mailbox not found"},
+        )
 
-    auth_url = service.get_authorization_url(tenant_id, mailbox_id)
-    return RedirectResponse(url=auth_url)
+    auth_url = service.get_authorization_url(tenant_id, mailbox_id, current_user.user_id)
+    return MailboxAuthorizeRead(authorization_url=auth_url)
 
 
 @router.post(

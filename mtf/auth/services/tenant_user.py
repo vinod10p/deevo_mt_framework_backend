@@ -231,6 +231,10 @@ class TenantUserService:
         password = getattr(data, "password", None) or None
 
         if existing is not None:
+            if actor is not None and actor.user_scope != "system":
+                conflict(
+                    "USER", "This email already has an account. Contact support to add a membership."
+                )
             if existing.user_scope != "tenant":
                 conflict("USER", "Email belongs to a non-tenant account")
             if self._existing_membership(tenant_id, existing.id) is not None:
@@ -345,6 +349,13 @@ class TenantUserService:
         if row is None:
             not_found("TENANT_USER", "Membership not found")
 
+        if (
+            actor is not None
+            and actor.user_scope != "system"
+            and getattr(data, "password", None) is not None
+        ):
+            forbidden("AUTH", "Use the identity password reset process to change passwords")
+
         if row.row_version != data.row_version:
             row_version_conflict("TENANT_USER")
 
@@ -373,14 +384,15 @@ class TenantUserService:
                 if self._count_active_admins(tenant_id, exclude_user_id=user_id) == 0:
                     conflict("TENANT_USER", "Cannot deactivate the last admin")
             row.is_active = data.is_active
-        if data.first_name is not None:
-            user.first_name = data.first_name
-        if data.last_name is not None:
-            user.last_name = data.last_name
-        if data.phone is not None:
-            user.phone = data.phone
-        if data.avatar_url is not None:
-            user.avatar_url = data.avatar_url
+        if actor is None or actor.user_scope == "system" or actor.user_id == user_id:
+            if data.first_name is not None:
+                user.first_name = data.first_name
+            if data.last_name is not None:
+                user.last_name = data.last_name
+            if data.phone is not None:
+                user.phone = data.phone
+            if data.avatar_url is not None:
+                user.avatar_url = data.avatar_url
         if getattr(data, "password", None):
             user.password_hash = hash_password(data.password)
             user.password_changed_at = now

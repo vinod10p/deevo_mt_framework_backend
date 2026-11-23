@@ -25,6 +25,12 @@ class MailboxRead(BaseModel):
     updated_at: datetime | None = None
 
 
+class MailboxAuthorizeRead(BaseModel):
+    """Microsoft consent URL; the admin app opens it in the browser."""
+
+    authorization_url: str
+
+
 class MailboxCreate(BaseModel):
     email_address: str
     display_name: str | None = None

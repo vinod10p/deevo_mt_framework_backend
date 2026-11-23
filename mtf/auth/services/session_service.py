@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Never
 
@@ -15,24 +16,29 @@ from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user import User
 from mtf.auth.schemas.session import LoginRequest, RefreshRequest, TokenResponse
+from mtf.auth.services.login_throttle import LoginThrottle, ThrottleLimits, login_throttle
 from mtf.shared.config import get_settings
 from mtf.shared.exceptions import unauthorized
 from mtf.shared.security import (
     create_access_token,
     create_refresh_token,
-    decode_token,
+    decode_refresh_token,
     generate_id,
     hash_token,
     verify_password,
 )
 from mtf.tenant.models import Tenant, TenantAccount
 
-_MAX_FAILED_LOGINS = 5
-_LOCKOUT_MINUTES = 15
+logger = logging.getLogger(__name__)
+
 _AUTH_GENERIC = "Invalid email or password"
 _TENANT_REQUIRED = "Tenant is required. Please use your tenant login link."
 # JWT ``user_type`` claim (subject class); ``auth.session.user_type`` stores ``user_scope``.
 _JWT_USER_TYPE_APP = "app_user"
+_RATE_LIMITED = "Too many login attempts. Please try again later."
+#: ``_reject_login`` reasons that count as a credential guess for throttling. Others
+#: (tenant_required, no_membership, …) happen *after* a correct password.
+_GUESS_REASONS = frozenset({None, "locked"})
 
 
 def _utc_naive_now() -> datetime:
@@ -43,8 +49,9 @@ def _utc_naive_now() -> datetime:
 class SessionService:
     """Login, refresh (rotate in place), logout, and logout-all for ``auth.session``."""
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, throttle: LoginThrottle | None = None) -> None:
         self._db = db
+        self._throttle = throttle or login_throttle
 
     def login(
         self,
@@ -55,6 +62,31 @@ class SessionService:
         now = _utc_naive_now()
         email_norm = request.email.strip().lower()
         source = source or AuditSource()
+        settings = get_settings()
+
+        # Throttle before touching the password or writing audit rows, so a flood of
+        # guesses costs neither a bcrypt check nor an audit insert.
+        retry_after = self._throttle.retry_after(
+            source.ip_address,
+            email_norm,
+            ThrottleLimits(
+                max_failures_per_ip=settings.login_max_failures_per_ip,
+                max_failures_per_account_ip=settings.login_max_failures_per_account_ip,
+                window_seconds=settings.login_failure_window_seconds,
+            ),
+        )
+        if retry_after is not None:
+            logger.warning(
+                "Login throttled for %s from %s (retry in %ss)",
+                email_norm,
+                source.ip_address,
+                retry_after,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "AUTH_RATE_LIMITED", "message": _RATE_LIMITED},
+                headers={"Retry-After": str(retry_after)},
+            )
 
         user = self._get_active_user_by_email(email_norm)
         if user is None:
@@ -71,11 +103,16 @@ class SessionService:
 
         if not verify_password(request.password, user.password_hash or ""):
             user.failed_login_count = user.failed_login_count + 1
-            if user.failed_login_count >= _MAX_FAILED_LOGINS:
-                user.locked_until = now + timedelta(minutes=_LOCKOUT_MINUTES)
+            # Account-wide backstop against guessing from many IPs; per-IP limits above
+            # mean one attacker cannot reach it quickly.
+            if user.failed_login_count >= settings.login_account_lockout_threshold:
+                user.locked_until = now + timedelta(
+                    minutes=settings.login_account_lockout_minutes
+                )
             self._db.add(user)
             self._reject_login(source, email_norm, user=user)
 
+        self._throttle.record_success(source.ip_address, email_norm)
         user.failed_login_count = 0
         user.locked_until = None
         user.last_login_at = now
@@ -121,6 +158,7 @@ class SessionService:
             user.user_scope,
             tenant_id,
             account_id,
+            session_id=session_id,
         )
         refresh_token = create_refresh_token(user.id, session_id)
 
@@ -223,7 +261,7 @@ class SessionService:
             unauthorized("AUTH", "Refresh token expired")
 
         try:
-            claims = decode_token(request.refresh_token)
+            claims = decode_refresh_token(request.refresh_token)
         except ValueError as exc:
             msg = str(exc)
             if msg == "TOKEN_EXPIRED":
@@ -237,11 +275,18 @@ class SessionService:
         if user is None:
             unauthorized("AUTH", "Invalid refresh token")
 
+        # Re-check what login checked: a suspended tenant or a removed staff member must
+        # not be able to mint new tokens (their API calls already get 401 — see deps).
+        if user.user_scope in ("tenant", "tenant_account"):
+            if session.tenant_id is None or self._usable_tenant(session.tenant_id) is None:
+                self._end_session(session, now, "tenant_inactive")
+        if user.user_scope == "tenant":
+            if self._get_active_tenant_membership(user.id, session.tenant_id) is None:
+                self._end_session(session, now, "membership_inactive")
+
         account_id: str | None = None
         account_name: str | None = None
         if user.user_scope == "tenant_account":
-            if session.tenant_id is None:
-                unauthorized("AUTH", "Invalid refresh token")
             account_id = self._require_single_account_membership(
                 user.id,
                 session.tenant_id,
@@ -254,6 +299,7 @@ class SessionService:
             user.user_scope,
             session.tenant_id,
             account_id,
+            session_id=session.id,
         )
         new_refresh = create_refresh_token(session.user_id, session.id)
 
@@ -291,12 +337,32 @@ class SessionService:
         *,
         source: AuditSource | None = None,
     ) -> None:
-        now = _utc_naive_now()
-        th = hash_token(raw_access_token)
-        session = self._get_session_by_access_hash(th)
-        if session is None:
-            return
+        session = self._get_session_by_access_hash(hash_token(raw_access_token))
+        if session is not None:
+            self._revoke_session(session, current_user_id, source)
 
+    def logout_by_refresh(
+        self,
+        raw_refresh_token: str,
+        expected_session_id: str,
+        *,
+        source: AuditSource | None = None,
+    ) -> bool:
+        session = self._get_session_by_refresh_hash(hash_token(raw_refresh_token))
+        if session is None:
+            return True
+        if session.id != expected_session_id:
+            return False
+        self._revoke_session(session, session.user_id, source)
+        return True
+
+    def _revoke_session(
+        self,
+        session: AuthSession,
+        current_user_id: str,
+        source: AuditSource | None,
+    ) -> None:
+        now = _utc_naive_now()
         session.is_active = False
         session.revoked_at = now
         session.revoke_reason = "logout"
@@ -422,7 +488,8 @@ class SessionService:
         )
         return self._db.scalars(stmt).first()
 
-    def _require_active_tenant(self, tenant_id: str) -> Tenant:
+    def _usable_tenant(self, tenant_id: str) -> Tenant | None:
+        """The tenant if it exists, is active and not suspended / cancelled / expired."""
         tenant = self._db.scalars(
             select(Tenant).where(
                 Tenant.id == tenant_id,
@@ -430,15 +497,29 @@ class SessionService:
             )
             .limit(1)
         ).first()
-        if tenant is None:
-            unauthorized("AUTH", _AUTH_GENERIC)
-        if not tenant.is_active or tenant.status in (
+        if tenant is None or not tenant.is_active or tenant.status in (
             "suspended",
             "cancelled",
             "expired",
         ):
+            return None
+        return tenant
+
+    def _require_active_tenant(self, tenant_id: str) -> Tenant:
+        tenant = self._usable_tenant(tenant_id)
+        if tenant is None:
             unauthorized("AUTH", _AUTH_GENERIC)
         return tenant
+
+    def _end_session(self, session: AuthSession, now: datetime, reason: str) -> Never:
+        """Deactivate ``session`` (its access token dies too) and reject the refresh."""
+        session.is_active = False
+        session.revoked_at = now
+        session.revoke_reason = reason
+        session.updated_at = now
+        self._db.add(session)
+        self._db.commit()
+        unauthorized("AUTH", "Invalid refresh token")
 
     def _list_active_account_memberships(
         self,
@@ -499,6 +580,8 @@ class SessionService:
                 AuthSession.is_active == True,  # noqa: E712
                 AuthSession.is_deleted == False,  # noqa: E712
             )
+            .with_hint(AuthSession, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+            .with_for_update()
             .limit(1)
         )
         return self._db.scalars(stmt).first()
@@ -543,6 +626,8 @@ class SessionService:
         reason: str | None = None,
         message: str = _AUTH_GENERIC,
     ) -> Never:
+        if reason in _GUESS_REASONS:
+            self._throttle.record_failure(source.ip_address, email)
         values: dict[str, str] = {"email": email}
         if reason is not None:
             values["reason"] = reason

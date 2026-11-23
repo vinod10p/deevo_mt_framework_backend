@@ -371,3 +371,63 @@ def test_app_role_cannot_update_or_delete_audit_log(
 
     with SessionLocal() as db:
         assert db.scalars(select(AuditLog).where(AuditLog.id == log_id)).first() is not None
+
+
+def _login_staff(client: TestClient, email: str, password: str, tenant_id: str) -> dict[str, str]:
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "email": email,
+            "password": password,
+            "created_from": "web",
+            "tenant_id": tenant_id,
+        },
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def test_tenant_member_cannot_read_audit_logs(
+    client: TestClient, system_headers: dict[str, str]
+) -> None:
+    """Only tenant admins read the trail; a plain member of the same tenant gets 403."""
+    create = client.post(
+        "/api/tenant/",
+        json={"name": "Audit Member Tenant", "subdomain": _unique("audit-member")},
+        headers=system_headers,
+    )
+    assert create.status_code == 201, create.text
+    tenant_id = create.json()["id"]
+    password = "Secret123!"
+    user_ids: list[str] = []
+
+    try:
+        accounts: dict[str, str] = {}
+        for role in ("admin", "member"):
+            email = _unique(f"audit-{role}") + "@example.com"
+            staff = client.post(
+                f"/api/tenant/{tenant_id}/users",
+                json={"email": email, "password": password, "role": role, "first_name": "A"},
+                headers=system_headers,
+            )
+            assert staff.status_code == 201, staff.text
+            user_ids.append(staff.json()["user_id"])
+            accounts[role] = email
+
+        admin_headers = _login_staff(client, accounts["admin"], password, tenant_id)
+        member_headers = _login_staff(client, accounts["member"], password, tenant_id)
+
+        own = _list_logs(client, admin_headers, limit=5)
+        assert own and all(row["tenant_id"] == tenant_id for row in own)
+
+        listed = client.get(LOGS_URL, headers=member_headers)
+        assert listed.status_code == 403, listed.text
+        assert listed.json()["detail"]["code"] == "AUTH_FORBIDDEN"
+
+        single = client.get(f"{LOGS_URL}/{own[0]['id']}", headers=member_headers)
+        assert single.status_code == 403, single.text
+    finally:
+        for user_id in user_ids:
+            client.delete(f"/api/tenant/{tenant_id}/users/{user_id}", headers=system_headers)
+            _cleanup_user(user_id)
+        client.delete(f"/api/tenant/{tenant_id}", headers=system_headers)

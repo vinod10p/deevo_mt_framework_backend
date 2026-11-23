@@ -16,9 +16,8 @@ class LoginRequest(BaseModel):
     tenant_id: str | None = None
 
 
-class TokenResponse(BaseModel):
+class AccessTokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     user_id: str
     user_type: str
@@ -29,6 +28,23 @@ class TokenResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     tenant_name: str | None = None
+
+
+class BrowserTokenResponse(AccessTokenResponse):
+    session_id: str
+
+
+class TokenResponse(AccessTokenResponse):
+    refresh_token: str
+
+
+class BrowserRefreshRequest(BaseModel):
+    refresh_token: str | None = None
+    session_id: str | None = None
+
+
+class BrowserLogoutRequest(BaseModel):
+    session_id: str
 
 
 class RefreshRequest(BaseModel):

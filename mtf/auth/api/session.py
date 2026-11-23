@@ -10,17 +10,27 @@ segment already applied in ``main`` (``/api/auth/auth/login``).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from hashlib import sha256
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from mtf.audit.api.deps import get_audit_source
 from mtf.audit.service import AuditSource
 from mtf.auth.schemas import UserMeRead
-from mtf.auth.schemas.session import LoginRequest, RefreshRequest, TokenResponse
+from mtf.auth.schemas.session import (
+    BrowserLogoutRequest,
+    BrowserRefreshRequest,
+    BrowserTokenResponse,
+    LoginRequest,
+    RefreshRequest,
+    TokenResponse,
+)
 from mtf.auth.services import TenantAccountUserService, TenantUserService, UserService
 from mtf.auth.services.me import me_rbac_fields
 from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.auth.services.session_service import SessionService
+from mtf.shared.config import get_settings
 from mtf.shared.deps import (
     CurrentUser,
     get_current_user,
@@ -28,6 +38,7 @@ from mtf.shared.deps import (
     get_permission_resolver,
 )
 from mtf.shared.exceptions import forbidden, unauthorized
+from mtf.shared.security import decode_access_token, decode_refresh_token
 
 router = APIRouter(tags=["auth"])
 
@@ -92,6 +103,105 @@ def refresh_token(
     service: SessionService = Depends(get_session_service),
 ) -> TokenResponse:
     return service.refresh(payload, source=source)
+
+
+def _browser_cookie(request: Request) -> str:
+    # The API host is shared by tenant frontends. Each allowed origin gets its
+    # own cookie name so an adjacent frontend cannot exchange this credential.
+    origin_hash = sha256(request.headers["Origin"].encode()).hexdigest()[:32]
+    return f"__Host-deevoflow-refresh-{origin_hash}"
+
+
+def _require_browser_origin(request: Request) -> None:
+    # Cookie-authenticated writes require an exact allowlist match, even when
+    # a request could reach the server without a CORS preflight.
+    if request.headers.get("Origin") not in get_settings().allowed_origins:
+        forbidden("AUTH", "Untrusted browser origin")
+
+
+def _browser_tokens(request: Request, response: Response, tokens: TokenResponse) -> BrowserTokenResponse:
+    if tokens.user_scope not in {"tenant", "tenant_account"}:
+        forbidden("AUTH", "This account cannot sign in to the tenant application")
+    response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(
+        _browser_cookie(request),
+        tokens.refresh_token,
+        max_age=get_settings().jwt_refresh_token_expire_days * 86400,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+    return BrowserTokenResponse.model_validate({
+        **tokens.model_dump(),
+        "session_id": decode_access_token(tokens.access_token)["sid"],
+    })
+
+
+@router.post(
+    "/browser/login",
+    response_model=BrowserTokenResponse,
+    dependencies=[Depends(_require_browser_origin)],
+)
+def browser_login(
+    request: Request,
+    payload: LoginRequest,
+    response: Response,
+    source: AuditSource = Depends(get_audit_source),
+    service: SessionService = Depends(get_session_service),
+) -> BrowserTokenResponse:
+    return _browser_tokens(request, response, service.login(payload, source=source))
+
+
+@router.post(
+    "/browser/refresh",
+    response_model=BrowserTokenResponse,
+    dependencies=[Depends(_require_browser_origin)],
+)
+def browser_refresh(
+    request: Request,
+    response: Response,
+    payload: BrowserRefreshRequest | None = None,
+    source: AuditSource = Depends(get_audit_source),
+    service: SessionService = Depends(get_session_service),
+) -> BrowserTokenResponse:
+    if payload is None:
+        unauthorized("AUTH", "Invalid refresh token")
+    if payload.session_id is None:
+        # One-time exchange for a legacy browser with its own token in storage.
+        token = payload.refresh_token
+    else:
+        token = request.cookies.get(_browser_cookie(request))
+        if token:
+            try:
+                session_id = decode_refresh_token(token).get("session_id")
+            except ValueError:
+                unauthorized("AUTH", "Invalid refresh token")
+            if session_id != payload.session_id:
+                unauthorized("AUTH", "Browser session changed")
+    if not token:
+        unauthorized("AUTH", "Invalid refresh token")
+    tokens = service.refresh(RefreshRequest(refresh_token=token), source=source)
+    return _browser_tokens(request, response, tokens)
+
+
+@router.post(
+    "/browser/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(_require_browser_origin)],
+)
+def browser_logout(
+    request: Request,
+    response: Response,
+    payload: BrowserLogoutRequest,
+    source: AuditSource = Depends(get_audit_source),
+    service: SessionService = Depends(get_session_service),
+) -> None:
+    cookie = _browser_cookie(request)
+    token = request.cookies.get(cookie)
+    if token and not service.logout_by_refresh(token, payload.session_id, source=source):
+        forbidden("AUTH", "Browser session changed")
+    response.delete_cookie(cookie, path="/", secure=True, httponly=True, samesite="strict")
 
 
 @router.get("/me", response_model=UserMeRead)

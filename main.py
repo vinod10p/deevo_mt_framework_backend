@@ -23,10 +23,14 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+    # Validated in Settings: exact origins; production = https only, never "*".
     allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=settings.cors_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    # Auth is a Bearer header (no cookies); clients may send other harmless headers.
     allow_headers=["*"],
+    # Let browsers read the wait time on 429 from /api/auth/login.
+    expose_headers=["Retry-After"],
 )
 app.add_middleware(AuditRequestIdMiddleware)
 
