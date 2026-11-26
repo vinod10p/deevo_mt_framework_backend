@@ -1,6 +1,6 @@
 # Security review — deevo_mt_framework_backend
 
-Branch: `feature/claude` · Review date: 2026-11-21 · Status: **all 10 findings fixed, not yet committed**
+Branch: `feature/claude` · Review date: 2026-11-21 · Status: **all 10 findings fixed, merged to `main`**
 
 This document records what the security review found, what was changed, what is still open,
 and what **must be configured before deploying to production** (several settings now stop the
@@ -8,8 +8,8 @@ app from starting if they are unsafe).
 
 | Reader | Read |
 |---|---|
-| Deploying MTF or DeevoFlow | §1 Production checklist |
-| Working on **deevoflow_backend** | §1, then **§2 Changes needed in deevoflow_backend** |
+| Deploying MTF or `deevo_api` | §1 Production checklist |
+| Working on **`deevo_api`** or a new package (`deevo_integration`, `deevo_crm`, `deevo_workflow`, …) | §1, then **§2 Changes needed in deevo_api and the new packages** |
 | Working on **deevoflow_react** | [frontend_security.md](frontend_security.md) |
 | Reviewing this branch | §3 – §5 |
 
@@ -31,7 +31,7 @@ The app **refuses to start** when `DEEVO_ENVIRONMENT=production` and any of the 
 | 7 | `DEEVO_ALLOWED_ORIGINS` | **Required.** Explicit JSON list of `https://host[:port]` origins — no `*`, `null`, `http://`, paths or trailing `/` | The built-in default is the localhost list, which production rejects | #10 |
 | 8 | `DEEVO_MAILBOX_OAUTH_SUCCESS_URL` | **Required.** `https://…` page of the admin app | Browser lands here after Microsoft consent | #2 |
 | 9 | `DEEVO_TRUSTED_PROXIES` | **Set if behind a proxy / load balancer** (JSON list of proxy IPs/CIDRs). Leave `[]` if uvicorn is exposed directly | Otherwise every user appears to share the proxy's IP, and login throttling would block everyone together | #8 |
-| 10 | `DEEVO_CORS_ALLOW_CREDENTIALS` | Optional. Default `true`; set `false` once no frontend uses `withCredentials` / `credentials: "include"` | Auth is Bearer-only; the backend sets no cookies | #10 |
+| 10 | `DEEVO_CORS_ALLOW_CREDENTIALS` | Optional. Default `true`. **Keep `true` if any frontend uses `/auth/browser/*`** (refresh token in an `HttpOnly` cookie); `false` only if every frontend uses Bearer tokens alone | `/auth/browser/login`, `/refresh` and `/logout` set and read a cookie, which needs credentialed CORS | #10 |
 | 11 | `DEEVO_LOGIN_*` limits | Optional. Defaults below | Tune login throttling | #8 |
 
 Generate a JWT secret:
@@ -55,49 +55,59 @@ attacker gets up to N× these numbers; counters reset on restart):
 
 All of these are documented in `.env.example`.
 
-## 2. Changes needed in deevoflow_backend
+## 2. Changes needed in deevo_api and the new packages
 
-DeevoFlow installs `mtf` as an editable package, mounts its routers under `/api/v1`
-(`auth`, `tenant`, `reports`, txn screens, `audit`) and builds its **own** FastAPI app in its
-own `main.py`. That decides what it gets for free and what it must change itself.
+`mtf` is consumed by **`deevo_api`** (the single deployable app, see
+[architecture.md](architecture.md)) and the packages it mounts (`deevo_integration`,
+`deevo_crm`, `deevo_workflow`, …). `deevo_api` installs `mtf`, mounts its routers under
+`/api/v1` (`auth`, `tenant`, `reports`, txn screens, `audit`) and builds its **own** FastAPI app
+in its own `main.py`. That decides what it gets for free and what it must do itself.
 
-### 2.1 Applies automatically (restart DeevoFlow after updating MTF)
+> **Old backend (`deevoflow_backend`).** It stays frozen until the cutover
+> ([architecture.md](architecture.md) §12). If it keeps running on the *old* `mtf`, it does
+> **not** get these fixes — notably #1, the unauthenticated mailbox `/authorize`. Keep that
+> window short. If the cutover slips beyond a few days, upgrade its `mtf` and apply B1–B10
+> there too (the same tasks, with `deevoflow_backend` in place of `deevo_api`).
+
+### 2.1 Applies automatically (restart `deevo_api` after updating MTF)
 
 Everything that lives in MTF services and dependencies:
 
-| Fix | What DeevoFlow users will notice |
+| Fix | What users of `deevo_api` will notice |
 |---|---|
 | #1 Mailbox OAuth | `/api/v1/tenant/{tenant_id}/mailboxes/{mailbox_id}/authorize` needs a **system** Bearer token and returns JSON `{"authorization_url": ...}` instead of redirecting |
 | #2 Mailbox errors / redirect | Generic error messages; redirect after consent comes from `DEEVO_MAILBOX_OAUTH_SUCCESS_URL` |
 | #3 Audit readers | `/api/v1/audit/logs` → **403** for tenant members and non-admin portal users |
 | #4 Session revocation | Logout, refresh, deactivation and membership removal end access immediately (**401**); removed staff and users of a suspended tenant can no longer refresh |
 | #6 Token types | Access tokens without `typ="access"` / `sid` get **401**; refresh accepts only refresh tokens |
-| #7, #9, #10 startup checks | Run inside DeevoFlow too, because it loads MTF `Settings` (MTF's DB engine is created from it). **DeevoFlow will refuse to start in production** until §1 is satisfied |
+| #7, #9, #10 startup checks | Run inside `deevo_api` too, because it loads MTF `Settings` (MTF's DB engine is created from it). **`deevo_api` will refuse to start in production** until §1 is satisfied |
 | #8 Login throttling | `/api/v1/auth/login` can return **429 `AUTH_RATE_LIMITED`** with `Retry-After` |
 
-### 2.2 Must do in deevoflow_backend
+### 2.2 Must do
 
-| # | Task | Why | Done when |
-|---|---|---|---|
-| B1 | **Re-sync dependencies** after pulling the new MTF (`uv sync` / `pip install -e`) | MTF now depends on **PyJWT** (not `python-jose`), FastAPI ≥ 0.165 / Starlette ≥ 1.3.1, python-multipart ≥ 0.0.31, `httpx` (runtime) | App starts; `pip-audit` clean |
-| B2 | If DeevoFlow code imports **`jose`** anywhere, switch it to PyJWT (`import jwt`; `jwt.ExpiredSignatureError`, `jwt.InvalidTokenError`; unverified claims: `jwt.decode(t, options={"verify_signature": False})`) — or add `python-jose` to DeevoFlow's own deps (not recommended: unmaintained, unfixed `ecdsa` advisory) | `python-jose` is no longer installed through MTF | `grep -rn "jose" --include=*.py` finds nothing |
-| B3 | Check DeevoFlow's own version pins don't conflict with FastAPI ≥ 0.165 / Starlette ≥ 1.3.1 | Older pins would block the security upgrade | Resolver succeeds |
-| B4 | **Copy the CORS hardening into DeevoFlow's `main.py`** (see snippet below) | MTF's `main.py` changed, DeevoFlow's did not. Without `expose_headers=["Retry-After"]` the React app cannot read the login 429 wait time | Preflight from the React origin OK; `Access-Control-Expose-Headers: Retry-After` present |
-| B5 | Add the **throttle-reset fixture** to DeevoFlow's `tests/conftest.py` (snippet below) | The login throttle is per process and every TestClient request comes from `testclient`; deliberate failed logins in one test will 429 later ones (including system login) | Integration suite has no unexpected 429s |
-| B6 | Remove any code that **creates access tokens itself** (`create_access_token(...)` without `session_id=`, or hand-built JWTs) — always issue tokens through MTF login/refresh | Such tokens have no `sid` and are now rejected with 401 | grep (below) finds no such calls |
-| B7 | Any code that authenticates by calling **`decode_token`** directly, or a DeevoFlow copy of **`get_current_user`**, must use MTF's `get_current_user` (or at least `decode_access_token`) | Otherwise those routes skip session revocation, membership checks and token-type checks (#4, #6) | All protected routes depend on `mtf.shared.deps.get_current_user` |
-| B8 | Update DeevoFlow tests that expect tenant **members** to read audit logs (expect 403 now) and any that reuse an access token after refresh/logout (expect 401) | Behaviour change from #3, #4 | Tests green |
-| B9 | If DeevoFlow handles the **mailbox OAuth callback** itself or links to `/authorize`, follow the new contract (fetch `authorization_url` with a system token, then open it); register the right `DEEVO_MICROSOFT_REDIRECT_URI` | #1 | Mailbox authorization works end to end |
-| B10 | Set the production values from §1 in DeevoFlow's environment (it reads the same `DEEVO_*` variables) | Startup checks | DeevoFlow starts with `DEEVO_ENVIRONMENT=production` |
+**Where:** `deevo_api` = the composition app; **packages** = `deevo_integration`, `deevo_crm`,
+`deevo_workflow` and later modules.
 
-Find B2, B6, B7, B8 quickly (run from deevoflow_backend):
+| # | Where | Task | Why | Done when |
+|---|---|---|---|---|
+| B1 | `deevo_api` | **Pin the new MTF** and re-sync (`uv lock` / `uv sync`) | MTF now depends on **PyJWT** (not `python-jose`), FastAPI ≥ 0.165 / Starlette ≥ 1.3.1, python-multipart ≥ 0.0.31, `httpx` (runtime) | App starts; `pip-audit` clean |
+| B2 | packages, `deevo_api` | Never import **`jose`**; use PyJWT (`import jwt`; `jwt.ExpiredSignatureError`, `jwt.InvalidTokenError`; unverified claims: `jwt.decode(t, options={"verify_signature": False})`). Do not add `python-jose` as a dependency (unmaintained, unfixed `ecdsa` advisory) | `python-jose` is no longer installed through MTF | `grep -rn "jose" --include=*.py` finds nothing |
+| B3 | packages, `deevo_api` | Version ranges must allow FastAPI ≥ 0.165 / Starlette ≥ 1.3.1 | Older pins would block the security upgrade | Resolver succeeds |
+| B4 | `deevo_api` | **Use the hardened CORS setup in `main.py`** (snippet below) | Without `expose_headers=["Retry-After"]` the React app cannot read the login 429 wait time | Preflight from the React origin OK; `Access-Control-Expose-Headers: Retry-After` present |
+| B5 | `deevo_api`, and any package whose tests log in | Add the **throttle-reset fixture** to `tests/conftest.py` (snippet below) | The login throttle is per process and every TestClient request comes from `testclient`; deliberate failed logins in one test will 429 later ones (including system login) | Integration suite has no unexpected 429s |
+| B6 | packages, `deevo_api` | Never **create access tokens** directly (`create_access_token(...)` without `session_id=`, or hand-built JWTs) — always issue tokens through MTF login/refresh | Such tokens have no `sid` and are rejected with 401 | grep (below) finds no such calls |
+| B7 | packages, `deevo_api` | Every protected route depends on MTF's **`get_current_user`** (or `require_*` helpers built on it) — no own copy, no direct **`decode_token`** | Otherwise those routes skip session revocation, membership checks and token-type checks (#4, #6) | All protected routes depend on `mtf.shared.deps.get_current_user` |
+| B8 | packages, `deevo_api` | Tests expect tenant **members** to get 403 on audit logs, and 401 when reusing an access token after refresh/logout | Behaviour change from #3, #4 | Tests green |
+| B9 | `deevo_integration` (or wherever mailbox setup lives), admin app | Follow the new **mailbox OAuth** contract (fetch `authorization_url` with a system token, then open it); register the right `DEEVO_MICROSOFT_REDIRECT_URI` for the `deevo_api` URL in Entra ID | #1 | Mailbox authorization works end to end |
+| B10 | `deevo_api` on Azure | Set the production values from §1 in the app settings (it reads the same `DEEVO_*` variables) | Startup checks | `deevo_api` starts with `DEEVO_ENVIRONMENT=production` |
+
+Find B2, B6, B7, B8 quickly (run from each repo):
 
 ```bash
 grep -rnE "from jose|import jose|create_access_token|decode_token|def get_current_user|CORSMiddleware|audit/logs" --include=*.py . | grep -v "/.venv/"
 ```
 
-**B4 — CORS in DeevoFlow `main.py`** (keep DeevoFlow's own origin source if it has one, but apply
-the same rules: exact `https://` origins in production, never `*`):
+**B4 — CORS in `deevo_api` `main.py`** (exact `https://` origins in production, never `*`):
 
 ```python
 from mtf.shared.config import get_settings
@@ -127,7 +137,7 @@ def reset_login_throttle() -> None:
     login_throttle.clear()
 ```
 
-**Smoke test after the changes** (DeevoFlow on port 8010):
+**Smoke test after the changes** (`deevo_api` on port 8010):
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8010/api/v1/auth/me
@@ -202,13 +212,12 @@ can only read `Retry-After` once B4 is deployed.
 | **Encrypt mailbox OAuth tokens at rest** (`email.mailbox_credential.access_token` / `refresh_token`, `Mail.ReadWrite` scope) | Deferred on purpose: another service reads these columns directly from the database, and would break until it can decrypt them | Agree an envelope format (e.g. Fernet/AES-GCM with a key from Key Vault, `enc:v1:` prefix, key rotation) with the reading service, then encrypt on write and re-encrypt legacy rows on next refresh |
 | **Shared mailboxes cannot be authorized** | Since #1 the callback requires the consenting account to open the mailbox's inbox. The app only requests `Mail.ReadWrite`, not `Mail.ReadWrite.Shared` | If shared mailboxes are needed, add the `.Shared` scope (and admin consent in Entra ID) |
 | **Admin UI uses the new `/authorize` contract** | Lives in another repository | Fetch `authorization_url` with the system token, then open it |
-| **deevoflow_backend follow-ups** | Lives in another repository | §2.2 tasks B1–B10 |
+| **`deevo_api` and package follow-ups** | Live in other repositories | §2.2 tasks B1–B10; also for `deevoflow_backend` if the cutover slips |
 | **deevoflow_react follow-ups** | Lives in another repository | [frontend_security.md](frontend_security.md) |
 | **Login throttle is per process** | In-memory by agreement | If you run several workers/instances, move counters to a shared store (DB table or Redis) |
 | **Test database is out of date** | 23 live tests fail without any of these changes: 15 because the seed is missing permissions such as `screen.lead.view`, 8 schema/trigger checks that pass when run alone but fail in the long full run | Re-seed / migrate the test DB so the integration suite is green and real regressions are visible |
 | **Local `.env`** | `DEEVO_JWT_SECRET_KEY` is a placeholder value; DB uses Driver 17 + trust-all certificate | Fine for local development (warnings only); make sure no deployed environment copies it |
 | Pre-existing lint (`ruff`) findings | Not part of this work (e.g. late import in `main.py`) | Clean up separately |
-| **Commit / review** | All changes are uncommitted on `feature/claude` | Review each fix, then commit |
 
 ---
 
