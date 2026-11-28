@@ -23,6 +23,7 @@ def _service_with_matching_session() -> tuple[SessionService, MagicMock]:
     session.id = SESSION_ID
     session.user_id = USER_ID
     session.tenant_id = None
+    session.business_unit_id = None
     session.refresh_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
         days=1
     )

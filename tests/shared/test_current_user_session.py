@@ -12,12 +12,13 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from mtf.shared import security
 from mtf.shared.config import get_settings
-from mtf.shared.deps import get_current_user
+from mtf.shared.deps import CurrentUser, get_business_unit_id, get_current_user
 
 USER_ID = "01HZYJZGXM0KV0K4T8Y9USER01"
 SESSION_ID = "01HZYJZGXM0KV0K4T8Y9SESS01"
 TENANT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE0"
 ACCOUNT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE1"
+BUSINESS_UNIT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDEB"
 
 
 def _token(scope: str = "system", **kwargs: object) -> str:
@@ -29,10 +30,13 @@ def _token(scope: str = "system", **kwargs: object) -> str:
     )
 
 
-def _db(*results: object) -> MagicMock:
-    """``db.scalars(...).first()`` returns ``results`` in order (session hash, then role)."""
+def _db(session_hash: bytes | None = None, *roles: str | None) -> MagicMock:
+    """The session lookup finds ``session_hash`` at BUSINESS_UNIT_ID (``None``: no live
+    session); membership lookups then return ``roles`` in order."""
     db = MagicMock()
-    db.scalars.return_value.first.side_effect = list(results)
+    row = MagicMock(token_hash=session_hash, business_unit_id=BUSINESS_UNIT_ID)
+    db.execute.return_value.first.return_value = row if session_hash is not None else None
+    db.scalars.return_value.first.side_effect = list(roles)
     return db
 
 
@@ -48,8 +52,14 @@ def _assert_401(token: str, db: MagicMock, message: str) -> None:
     assert exc_info.value.detail["message"] == message
 
 
+def _assert_no_db(db: MagicMock) -> None:
+    db.execute.assert_not_called()
+    db.scalars.assert_not_called()
+
+
 def _sql(db: MagicMock, call: int = 0) -> str:
-    stmt = db.scalars.call_args_list[call].args[0]
+    """SQL of query ``call``: 0 is the session lookup, then the membership lookups."""
+    stmt = (db.execute.call_args_list + db.scalars.call_args_list)[call].args[0]
     return str(stmt.compile(compile_kwargs={"literal_binds": True}))
 
 
@@ -63,7 +73,7 @@ def test_live_session_system_user_ok() -> None:
     db = _db(security.hash_token(token))
     user = _call(token, db)
     assert (user.user_id, user.user_scope, user.tenant_id) == (USER_ID, "system", None)
-    assert db.scalars.call_count == 1  # system users need no membership lookup
+    db.scalars.assert_not_called()  # system users need no membership lookup
 
 
 def test_session_lookup_is_by_pk_and_checks_revocation_and_user() -> None:
@@ -96,7 +106,7 @@ def test_token_without_sid_rejected_before_db() -> None:
     token = security.create_access_token(USER_ID, "app_user", "system", None)
     db = _db()
     _assert_401(token, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 @pytest.mark.parametrize("sid", ["", 123], ids=["empty", "not-a-string"])
@@ -115,14 +125,14 @@ def test_malformed_sid_rejected(sid: object) -> None:
     )
     db = _db()
     _assert_401(token, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 def test_refresh_token_cannot_be_used_as_bearer() -> None:
     refresh = security.create_refresh_token(USER_ID, SESSION_ID)
     db = _db(security.hash_token(refresh))
     _assert_401(refresh, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 def test_expired_token_rejected_before_db() -> None:
@@ -139,7 +149,7 @@ def test_expired_token_rejected_before_db() -> None:
     )
     db = _db()
     _assert_401(token, db, "Token expired")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 def test_token_for_another_session_rejected() -> None:
@@ -190,7 +200,7 @@ def test_tenant_scope_without_tenant_skips_lookup() -> None:
     db = _db(security.hash_token(token))
     user = _call(token, db)
     assert user.tenant_id is None
-    assert db.scalars.call_count == 1
+    db.scalars.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +244,7 @@ def test_non_access_typ_rejected_before_db(typ: object) -> None:
     token = _signed(typ=typ)
     db = _db(security.hash_token(token))
     _assert_401(token, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 @pytest.mark.parametrize(
@@ -246,7 +256,7 @@ def test_unknown_user_scope_rejected_not_defaulted(scope: object) -> None:
     token = _signed(user_scope=scope)
     db = _db(security.hash_token(token))
     _assert_401(token, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 @pytest.mark.parametrize(
@@ -258,7 +268,7 @@ def test_unknown_user_type_rejected_not_defaulted(user_type: object) -> None:
     token = _signed(user_type=user_type)
     db = _db(security.hash_token(token))
     _assert_401(token, db, "Invalid token")
-    db.scalars.assert_not_called()
+    _assert_no_db(db)
 
 
 @pytest.mark.parametrize("user_type", ["app_user", "customer_user"])
@@ -275,3 +285,34 @@ def test_every_known_scope_and_type_accepted(scope: str, user_type: str) -> None
         results.append("member")
     user = _call(token, _db(*results))
     assert (user.user_scope, user.user_type) == (scope, user_type)
+
+
+# ---------------------------------------------------------------------------
+# Business unit: from the session row, never from the token
+# ---------------------------------------------------------------------------
+
+
+def test_business_unit_comes_from_the_session_row() -> None:
+    token = security.create_access_token(
+        USER_ID, "app_user", "tenant", TENANT_ID,
+        session_id=SESSION_ID, business_unit_id="01HZYJZGXM0KV0K4T8Y9FORGED",
+    )
+    db = _db(security.hash_token(token), "member")
+    user = _call(token, db)
+    assert user.business_unit_id == BUSINESS_UNIT_ID
+    assert "auth.session.business_unit_id" in _sql(db)
+
+
+def _staff(business_unit_id: str | None) -> CurrentUser:
+    return CurrentUser(USER_ID, "app_user", "tenant", TENANT_ID, None, business_unit_id)
+
+
+def test_get_business_unit_id_returns_the_session_unit() -> None:
+    assert get_business_unit_id(_staff(BUSINESS_UNIT_ID)) == BUSINESS_UNIT_ID
+
+
+def test_get_business_unit_id_without_a_unit_is_401() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        get_business_unit_id(_staff(None))
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail["message"] == "Store context required"

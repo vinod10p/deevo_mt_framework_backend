@@ -42,12 +42,14 @@ class TenantMembershipUpdate(BaseModel):
 
 
 class TenantMembershipRead(BaseModel):
-    """API projection for ``auth.tenant_user`` — excludes ``invite_token``."""
+    """API projection for ``auth.tenant_user`` — excludes ``invite_token_hash``."""
 
     model_config = ConfigDict(from_attributes=True, ser_json_bytes="base64")
 
     id: str
     tenant_id: str
+    business_unit_id: str
+    default_business_unit_id: str | None
     user_id: str
     role: str
 

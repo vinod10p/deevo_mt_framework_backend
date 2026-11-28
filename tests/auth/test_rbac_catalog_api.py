@@ -67,6 +67,7 @@ def _role() -> Role:
         description=None,
         user_scope="tenant",
         is_system=True,
+        is_tenant_wide=False,
         is_active=True,
         is_deleted=False,
         row_version=_ROW_VER,

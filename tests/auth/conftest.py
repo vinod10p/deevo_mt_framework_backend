@@ -8,7 +8,9 @@ from collections.abc import Generator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+
+from tests.cleanup import soft_delete_tenants, soft_delete_users
+from tests.staff_login import PASSWORD
 
 
 @pytest.fixture
@@ -38,26 +40,6 @@ def clear_app_dependency_overrides() -> Generator[None, None, None]:
     app.dependency_overrides.clear()
 
 
-PASSWORD = "Secret123!"
-
-
-def _soft_delete_user(user_id: str) -> None:
-    from mtf.auth.models.user import User
-    from mtf.shared.database import SessionLocal
-    from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
-
-    with SessionLocal() as db:
-        user = db.scalars(select(User).where(User.id == user_id)).first()
-        if user is None:
-            return
-        user.is_active = False
-        user.is_deleted = True
-        user.updated_by = SEEDED_SYSTEM_USER_ID
-        user.deleted_by = SEEDED_SYSTEM_USER_ID
-        db.add(user)
-        db.commit()
-
-
 @pytest.fixture
 def staff(client: TestClient, system_auth_headers: dict[str, str]) -> Iterator[dict]:
     """A fresh tenant with one admin staff user."""
@@ -80,6 +62,5 @@ def staff(client: TestClient, system_auth_headers: dict[str, str]) -> Iterator[d
     try:
         yield {"tenant_id": tenant_id, "email": email, "user_id": user_id}
     finally:
-        client.delete(f"/api/tenant/{tenant_id}/users/{user_id}", headers=system_auth_headers)
-        _soft_delete_user(user_id)
-        client.delete(f"/api/tenant/{tenant_id}", headers=system_auth_headers)
+        soft_delete_users(user_id)
+        soft_delete_tenants(tenant_id)

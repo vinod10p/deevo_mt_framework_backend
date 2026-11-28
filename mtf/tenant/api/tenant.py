@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from mtf.audit.api.deps import get_audit_source
 from mtf.audit.service import AuditSource
 from mtf.auth.services import TenantAccountUserService, TenantUserService
-from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination, require_scope
 from mtf.shared.config import get_settings
+from mtf.shared.deps import CurrentUser, PaginationParams, get_db, get_pagination, require_scope
 from mtf.shared.exceptions import raise_if_not_found
 from mtf.tenant.schemas import (
     MailboxAuthorizeRead,

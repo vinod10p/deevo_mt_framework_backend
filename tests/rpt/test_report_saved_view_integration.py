@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.rpt.models import ReportColumn, ReportDefinition, ReportSavedView
 from mtf.rpt.services import validate_report_layout
+from mtf.shared.clock import utc_now
 from mtf.shared.database import SessionLocal
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.security import generate_id
@@ -57,7 +58,8 @@ def context(db: Session) -> dict[str, object]:
             ReportColumn.report_id == report.id, ReportColumn.is_deleted == False  # noqa: E712
         )
     ).all()
-    return {"report": report, "tenant_id": member.tenant_id, "user_id": member.user_id,
+    return {"report": report, "tenant_id": member.tenant_id,
+            "business_unit_id": member.business_unit_id, "user_id": member.user_id,
             "columns": columns}
 
 
@@ -70,6 +72,7 @@ def _view(context: dict[str, object], **overrides: object) -> ReportSavedView:
     values: dict[str, object] = {
         "id": generate_id(),
         "tenant_id": context["tenant_id"],
+        "business_unit_id": context["business_unit_id"],
         "report_id": context["report"].id,  # type: ignore[attr-defined]
         "scope_type": "user",
         "user_id": context["user_id"],
@@ -108,7 +111,8 @@ def test_version_check_rejects_unversioned_json(db: Session, context: dict) -> N
 
 
 def test_default_state_check_rejects_deleted_default(db: Session, context: dict) -> None:
-    db.add(_view(context, is_default=True, is_deleted=True))
+    deleted = {"is_deleted": True, "deleted_at": utc_now(), "deleted_by": context["user_id"]}
+    db.add(_view(context, is_default=True, **deleted))
     with pytest.raises(IntegrityError):
         db.flush()
 

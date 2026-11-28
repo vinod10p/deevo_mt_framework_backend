@@ -6,15 +6,14 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
+from main import app
 from mtf.auth.api.session import (
     get_tenant_account_service_for_me,
     get_tenant_account_user_service,
     get_user_service,
 )
 from mtf.auth.models.tenant_account_user import TenantAccountUser
-from main import app
 from mtf.shared.deps import CurrentUser, get_current_user, get_permission_resolver
-
 from tests.auth.test_system_auth_api import _minimal_user
 from tests.tenant.conftest import (
     TEST_ACCOUNT_ID,

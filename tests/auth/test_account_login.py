@@ -8,12 +8,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from main import app
 from mtf.auth.api.session import get_session_service
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.schemas.session import TokenResponse
 from mtf.auth.services.session_service import SessionService
-from main import app
-
 from tests.tenant.conftest import TEST_ACCOUNT_ID, TEST_TENANT_ID, TEST_USER_ID
 
 

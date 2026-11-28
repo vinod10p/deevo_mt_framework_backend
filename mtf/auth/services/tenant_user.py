@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -24,15 +23,13 @@ from mtf.auth.services.membership_rbac import (
     revoke_tenant_user_roles,
     sync_tenant_user_role,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
 from mtf.shared.security import generate_id, hash_password
+from mtf.tenant.business_units import membership_units
 from mtf.tenant.models import Tenant
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TenantUserService:
@@ -226,7 +223,7 @@ class TenantUserService:
 
         email_norm = str(data.email).strip().lower()
         existing = self._get_active_user_by_email(email_norm)
-        now = _utc_naive_now()
+        now = utc_now()
 
         password = getattr(data, "password", None) or None
 
@@ -293,14 +290,13 @@ class TenantUserService:
                 tenant_id=tenant_id,
             )
 
-        row = TenantUser(
-            id=generate_id(),
+        row = TenantUser.new(
+            by=created_by,
             tenant_id=tenant_id,
+            **membership_units(self._db, tenant_id),
             user_id=user.id,
             role=data.role,
             joined_at=now,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -370,7 +366,7 @@ class TenantUserService:
             elif data.role is not None and data.role != "admin":
                 conflict("TENANT_USER", "Cannot demote your own admin membership")
 
-        now = _utc_naive_now()
+        now = utc_now()
         before_row = row_snapshot(row)
         before_user = row_snapshot(user)
 
@@ -446,7 +442,7 @@ class TenantUserService:
         tenant_id: str,
         user_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -463,13 +459,7 @@ class TenantUserService:
 
         before = row_snapshot(row)
         row.is_active = False
-        row.is_deleted = True
-        row.deleted_by = deleted_by
-        row.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            row.updated_by = deleted_by
-
-        self._db.add(row)
+        row.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=row,
@@ -516,16 +506,15 @@ class TenantUserService:
         if self._existing_membership(data.tenant_id, data.user_id) is not None:
             conflict("TENANT_USER", "User is already a member of this tenant")
 
-        row = TenantUser(
-            id=generate_id(),
+        row = TenantUser.new(
+            by=created_by,
             tenant_id=data.tenant_id,
+            **membership_units(self._db, data.tenant_id),
             user_id=data.user_id,
             role=data.role,
             invited_at=data.invited_at,
             invited_by=data.invited_by,
             joined_at=data.joined_at,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -573,7 +562,7 @@ class TenantUserService:
         for key, value in updates.items():
             setattr(row, key, value)
 
-        row.updated_at = _utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 
@@ -617,7 +606,7 @@ class TenantUserService:
         self,
         tenant_user_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -630,13 +619,7 @@ class TenantUserService:
             row_version_conflict("TENANT_USER")
 
         before = row_snapshot(row)
-        row.is_deleted = True
-        row.deleted_by = deleted_by
-        row.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            row.updated_by = deleted_by
-
-        self._db.add(row)
+        row.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=row,

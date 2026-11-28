@@ -21,7 +21,6 @@ from mtf.auth.services.rbac_catalog import (
 )
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, not_found
-from mtf.shared.security import generate_id
 
 
 class RolePermissionService:
@@ -76,13 +75,11 @@ class RolePermissionService:
         if self._live_grant(role_id, data.permission_id) is not None:
             conflict("AUTH_ROLE_PERMISSION", "Permission is already granted to this role")
 
-        row = RolePermission(
-            id=generate_id(),
+        row = RolePermission.new(
+            by=created_by,
             role_id=role.id,
             permission_id=permission.id,
             user_scope=role.user_scope,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(

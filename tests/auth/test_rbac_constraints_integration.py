@@ -83,11 +83,13 @@ def _permission(*, user_scope: str, action: str = "view") -> Permission:
     )
 
 
-def _role(*, user_scope: str, tenant_id: str | None, is_system: bool) -> Role:
+def _role(*, user_scope: str, membership: TenantUser | None, is_system: bool) -> Role:
+    """Tenant role (at the membership's root unit) or, without a membership, a platform role."""
     token = generate_id()[:10].lower()
     return Role(
         id=generate_id(),
-        tenant_id=tenant_id,
+        tenant_id=membership.tenant_id if membership else None,
+        business_unit_id=membership.business_unit_id if membership else None,
         code=f"pytest_{token}",
         name=f"pytest {token}",
         user_scope=user_scope,
@@ -97,7 +99,7 @@ def _role(*, user_scope: str, tenant_id: str | None, is_system: bool) -> Role:
 
 def test_matching_scope_role_permission_inserts(db: Session, membership: TenantUser) -> None:
     permission = _permission(user_scope="tenant")
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(permission)
     db.add(role)
     db.flush()
@@ -117,7 +119,7 @@ def test_matching_scope_role_permission_inserts(db: Session, membership: TenantU
 
 def test_cross_scope_role_permission_is_rejected(db: Session, membership: TenantUser) -> None:
     system_permission = _permission(user_scope="system")
-    tenant_role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    tenant_role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(system_permission)
     db.add(tenant_role)
     db.flush()
@@ -137,7 +139,7 @@ def test_cross_scope_role_permission_is_rejected(db: Session, membership: Tenant
 def test_user_role_scope_shape_rejects_tenant_id_on_system(
     db: Session, membership: TenantUser
 ) -> None:
-    role = _role(user_scope="system", tenant_id=None, is_system=True)
+    role = _role(user_scope="system", membership=None, is_system=True)
     db.add(role)
     db.flush()
     system_user = db.scalars(
@@ -152,6 +154,7 @@ def test_user_role_scope_shape_rejects_tenant_id_on_system(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=system_user.id,
             account_id=None,
             role_id=role.id,
@@ -172,13 +175,14 @@ def test_role_report_export_requires_view(db: Session, membership: TenantUser) -
     ).first()
     if report is None:
         pytest.skip("no live system report_definition")
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
     db.add(
         RoleReport(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             role_id=role.id,
             report_id=report.id,
             can_view=False,
@@ -267,13 +271,14 @@ def test_template_role_can_be_assigned_to_tenant_member(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=None, is_system=True)
+    role = _role(user_scope="tenant", membership=None, is_system=True)
     db.add(role)
     db.flush()
     db.add(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=membership.user_id,
             account_id=None,
             role_id=role.id,
@@ -287,7 +292,7 @@ def test_user_role_rejects_deleted_role(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
     role.is_deleted = True
@@ -298,6 +303,7 @@ def test_user_role_rejects_deleted_role(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=membership.user_id,
             account_id=None,
             role_id=role.id,
@@ -313,7 +319,7 @@ def test_user_role_rejects_non_member(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     outsider = _new_user(db, user_scope="tenant")
     db.add(role)
     db.flush()
@@ -321,6 +327,7 @@ def test_user_role_rejects_non_member(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=outsider.id,
             account_id=None,
             role_id=role.id,
@@ -343,6 +350,7 @@ def test_user_role_rejects_portal_non_member(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=outsider.id,
             account_id=account.id,
             role_id=role.id,
@@ -372,6 +380,7 @@ def test_user_role_rejects_account_from_another_tenant(
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=portal.user_id,
             account_id=other.id,
             role_id=role.id,
@@ -393,6 +402,7 @@ def test_tenant_account_user_rejects_account_from_another_tenant(
         TenantAccountUser(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             account_id=other.id,
             user_id=portal.id,
             role="member",
@@ -423,6 +433,7 @@ def test_role_report_allows_platform_template(
         RoleReport(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             role_id=role.id,
             report_id=report.id,
             can_view=True,
@@ -437,13 +448,14 @@ def test_role_report_rejects_system_role(
 ) -> None:
     db = tenant_integrity
     report = _system_report(db)
-    role = _role(user_scope="system", tenant_id=None, is_system=True)
+    role = _role(user_scope="system", membership=None, is_system=True)
     db.add(role)
     db.flush()
     db.add(
         RoleReport(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             role_id=role.id,
             report_id=report.id,
             can_view=True,
@@ -460,10 +472,11 @@ def test_role_report_rejects_other_tenant_report(
 ) -> None:
     db = tenant_integrity
     other = _other_account(db, membership.tenant_id)
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     report = ReportDefinition(
         id=generate_id(),
         tenant_id=other.tenant_id,
+        business_unit_id=other.business_unit_id,
         scope_type="tenant",
         report_key=f"pytest_{generate_id()[:10].lower()}",
         display_name="pytest other tenant report",
@@ -476,6 +489,7 @@ def test_role_report_rejects_other_tenant_report(
         RoleReport(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             role_id=role.id,
             report_id=report.id,
             can_view=True,
@@ -492,7 +506,7 @@ def test_default_role_report_rejects_tenant_owned_role(
 ) -> None:
     db = tenant_integrity
     report = _system_report(db)
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
     db.add(
@@ -517,6 +531,7 @@ def test_default_role_report_rejects_tenant_report(
     report = ReportDefinition(
         id=generate_id(),
         tenant_id=membership.tenant_id,
+        business_unit_id=membership.business_unit_id,
         scope_type="tenant",
         report_key=f"pytest_{generate_id()[:10].lower()}",
         display_name="pytest tenant report",
@@ -542,10 +557,12 @@ def test_role_tenant_id_is_immutable(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
+    # A consistent platform shape (no tenant, no unit), so only the trigger can object.
     role.tenant_id = None
+    role.business_unit_id = None
     role.is_system = True
     with pytest.raises(DBAPIError) as exc_info:
         db.flush()
@@ -556,7 +573,7 @@ def test_role_user_scope_is_immutable(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
     role.user_scope = "tenant_account"
@@ -569,10 +586,11 @@ def test_report_scope_guard_while_granted(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     report = ReportDefinition(
         id=generate_id(),
         tenant_id=membership.tenant_id,
+        business_unit_id=membership.business_unit_id,
         scope_type="tenant",
         report_key=f"pytest_{generate_id()[:10].lower()}",
         display_name="pytest granted report",
@@ -585,6 +603,7 @@ def test_report_scope_guard_while_granted(
         RoleReport(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             role_id=role.id,
             report_id=report.id,
             can_view=True,
@@ -592,8 +611,10 @@ def test_report_scope_guard_while_granted(
         )
     )
     db.flush()
+    # A consistent system shape (no tenant, no unit), so only the trigger can object.
     report.scope_type = "system"
     report.tenant_id = None
+    report.business_unit_id = None
     with pytest.raises(DBAPIError) as exc_info:
         db.flush()
     assert "51009" in _orig(exc_info.value)
@@ -603,12 +624,13 @@ def test_soft_deleted_user_role_skips_integrity_trigger(
     tenant_integrity: Session, membership: TenantUser
 ) -> None:
     db = tenant_integrity
-    role = _role(user_scope="tenant", tenant_id=membership.tenant_id, is_system=False)
+    role = _role(user_scope="tenant", membership=membership, is_system=False)
     db.add(role)
     db.flush()
     assignment = UserRole(
         id=generate_id(),
         tenant_id=membership.tenant_id,
+        business_unit_id=membership.business_unit_id,
         user_id=membership.user_id,
         account_id=None,
         role_id=role.id,

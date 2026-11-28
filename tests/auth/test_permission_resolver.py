@@ -8,6 +8,7 @@ from sqlalchemy.dialects import mssql
 
 from mtf.auth.services.permission_resolver import PermissionResolver, ReportGrant
 from mtf.shared.deps import CurrentUser
+from tests.conftest import TEST_BUSINESS_UNIT_ID
 
 TEST_TENANT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE0"
 TEST_USER_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE3"
@@ -147,3 +148,41 @@ def test_report_grants_or_across_roles_and_memoize() -> None:
     assert grants["report-b"] == ReportGrant("report-b", can_view=True, can_export=False)
     assert resolver.report_grants(tenant_user()) is grants
     assert db.execute.call_count == 1
+
+
+# --- store-aware roles (decision 9) ------------------------------------------------------
+
+STORE_ID = "01HZYJZGXM0KV0K4T8Y9STORE1"
+
+
+def _staff_at(business_unit_id: str) -> CurrentUser:
+    return CurrentUser(TEST_USER_ID, "app_user", "tenant", TEST_TENANT_ID, None, business_unit_id)
+
+
+def _role_units_sql(business_unit_id: str) -> str:
+    stmt = PermissionResolver(MagicMock())._role_ids_stmt(_staff_at(business_unit_id))
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
+def test_store_session_counts_root_and_store_roles() -> None:
+    sql = _role_units_sql(STORE_ID)
+    unit_join = "tenant.business_unit.id = auth.user_role.business_unit_id"
+    assert f"JOIN tenant.business_unit ON {unit_join}" in sql
+    assert (
+        f"(tenant.business_unit.bu_type = 'root' OR auth.user_role.business_unit_id = '{STORE_ID}')"
+        in sql
+    )
+
+
+def test_all_stores_mode_counts_only_root_roles() -> None:
+    sql = _role_units_sql(TEST_BUSINESS_UNIT_ID)
+    assert "tenant.business_unit.bu_type = 'root'" in sql
+
+
+def test_cache_is_per_store() -> None:
+    db = MagicMock()
+    db.scalars.return_value.all.side_effect = [["screen.a"], ["screen.b"]]
+    resolver = PermissionResolver(db)
+    assert resolver.permission_codes(_staff_at(STORE_ID)) == {"screen.a"}
+    assert resolver.permission_codes(_staff_at(TEST_BUSINESS_UNIT_ID)) == {"screen.b"}
+    assert resolver.permission_codes(_staff_at(STORE_ID)) == {"screen.a"}

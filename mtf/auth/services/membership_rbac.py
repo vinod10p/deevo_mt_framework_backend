@@ -9,7 +9,6 @@ Revoke (membership removed) soft-deletes every assignment in that place.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import TypeVar
 
 from sqlalchemy import Select, select
@@ -27,9 +26,10 @@ from mtf.auth.models.role import Role
 from mtf.auth.models.role_report import RoleReport
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user_role import UserRole
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 
 T = TypeVar("T")
 
@@ -44,10 +44,6 @@ ACCOUNT_MEMBERSHIP_ROLE_MAP: dict[str, str] = {
 }
 ADMIN_TEMPLATE_CODE = "tenant_admin"
 MEMBER_TEMPLATE_CODE = "tenant_member"  # kept only so sync can retire old rows
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _orm_rows(result: object, model: type[T]) -> list[T]:
@@ -145,20 +141,20 @@ def copy_default_role_reports(
         )
     }
 
+    root_id = root_unit_id(db, tenant_id)
     inserted = 0
     for default in defaults:
         pair = (default.role_id, default.report_id)
         if pair in existing:
             continue
-        row = RoleReport(
-            id=generate_id(),
+        row = RoleReport.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=root_id,
             role_id=default.role_id,
             report_id=default.report_id,
             can_view=default.can_view,
             can_export=default.can_export,
-            created_by=created_by,
-            updated_by=created_by,
         )
         db.add(row)
         audit_insert(
@@ -372,16 +368,16 @@ def _sync_assignment(
     if role is None:
         return
     if keep is None:
-        assignment = UserRole(
-            id=generate_id(),
+        # Membership templates apply in every store, so they sit at the root unit.
+        assignment = UserRole.new(
+            by=actor_id,
             tenant_id=tenant_id,
+            business_unit_id=root_unit_id(db, tenant_id),
             user_id=user_id,
             account_id=account_id,
             role_id=role.id,
             user_scope=user_scope,
             is_active=is_active,
-            created_by=actor_id,
-            updated_by=actor_id,
         )
         db.add(assignment)
         audit_insert(
@@ -399,8 +395,7 @@ def _sync_assignment(
     before = row_snapshot(keep)
     keep.is_active = is_active
     keep.updated_by = actor_id
-    keep.updated_at = _utc_naive_now()
-    db.add(keep)
+    keep.updated_at = utc_now()
     audit_update(
         db,
         entity=keep,
@@ -451,14 +446,8 @@ def _soft_delete_assignment(
     if deleted_by is None:
         conflict("AUTH_ROLE", "Cannot revoke a role assignment without deleted_by")
     before = row_snapshot(row)
-    now = _utc_naive_now()
     row.is_active = False
-    row.is_deleted = True
-    row.deleted_at = now
-    row.deleted_by = deleted_by
-    row.updated_at = now
-    row.updated_by = deleted_by
-    db.add(row)
+    row.mark_deleted(deleted_by)
     audit_soft_delete(
         db,
         entity=row,

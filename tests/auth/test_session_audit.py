@@ -99,7 +99,7 @@ def test_successful_login_writes_login_on_session() -> None:
     assert (log.schema_name, log.table_name) == ("auth", "session")
     assert log.record_id == log.session_id
     assert log.request_id == SOURCE.request_id
-    assert json.loads(log.new_values) == {"event": "login"}
+    assert json.loads(log.new_values) == {"event": "login", "business_unit_id": None}
     sessions = _added(db, AuthSession)
     assert sessions[0].ip_address == "10.0.0.1"
 

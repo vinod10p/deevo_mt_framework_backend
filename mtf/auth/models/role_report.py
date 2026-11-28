@@ -1,86 +1,42 @@
-"""SQLAlchemy model — `auth.role_report`."""
+"""SQLAlchemy model — ``auth.role_report``."""
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, text
-from sqlalchemy.dialects.mssql import ROWVERSION
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.schema import FetchedValue
+from sqlalchemy.orm import Mapped
 
 from mtf.shared.database import Base
+from mtf.shared.model_columns import (
+    TENANT_FK,
+    StandardColumnsMixin,
+    business_unit_fk,
+    flag,
+    ulid,
+    ulid_pk,
+)
 
-_DT_UTC = DateTime(timezone=False)
 
+class RoleReport(StandardColumnsMixin, Base):
+    """Report access granted to a role, owned by one tenant.
 
-class RoleReport(Base):
-    """Per-tenant report grant for a role — table ``auth.role_report``.
-
-    Every row belongs to a tenant. Platform defaults are copied in from
-    ``auth.default_role_report`` at onboarding, not read at runtime.
-    ``can_export`` requires ``can_view`` (``CK_role_report_export_needs_view``).
+    Platform defaults are copied in from ``auth.default_role_report`` at onboarding and
+    are not read at runtime. ``can_export`` requires ``can_view``
+    (``CK_role_report_export_needs_view``).
     """
 
     __tablename__ = "role_report"
     __table_args__ = (
-        # AFTER INSERT/UPDATE trigger: SQL Server rejects OUTPUT without INTO.
+        business_unit_fk("role_report"),
+        # Kept from the dev2 AFTER INSERT/UPDATE trigger (SQL Server rejects OUTPUT without INTO).
         {"schema": "auth", "implicit_returning": False},
     )
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("tenant.tenant.id"),
-        nullable=False,
-    )
-    role_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("auth.role.id"),
-        nullable=False,
-    )
-    report_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("rpt.report_definition.id"),
-        nullable=False,
-    )
-    can_view: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
-    can_export: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
-    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-
-    row_version: Mapped[bytes] = mapped_column(
-        ROWVERSION,
-        nullable=False,
-        server_default=FetchedValue(),
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    created_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    updated_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(_DT_UTC, nullable=True)
-    deleted_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
+    id: Mapped[str] = ulid_pk()
+    tenant_id: Mapped[str] = ulid(TENANT_FK)
+    business_unit_id: Mapped[str] = ulid()
+    role_id: Mapped[str] = ulid("auth.role.id")
+    report_id: Mapped[str] = ulid("rpt.report_definition.id")
+    can_view: Mapped[bool] = flag(default=True)
+    can_export: Mapped[bool] = flag(default=False)
 
     def __repr__(self) -> str:
         return (

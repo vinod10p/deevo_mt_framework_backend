@@ -10,23 +10,13 @@ from sqlalchemy.exc import DBAPIError
 
 from mtf.shared.database import engine
 from tests.auth.test_rbac_fix_04 import FIX_PATH
-from tests.auth.test_rbac_screens_flag_integration import _batches
+from tests.sql_scripts import apply_sql_script
 
 pytestmark = pytest.mark.integration
 
 
 def _apply_fix() -> None:
-    sql = FIX_PATH.read_text(encoding="utf-8")
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        try:
-            for batch in _batches(sql):
-                if batch.lstrip().upper().startswith("USE "):
-                    continue
-                conn.execute(text(batch))
-        finally:
-            # The script sets NOCOUNT/XACT_ABORT ON; a pooled connection that keeps
-            # them reports rowcount -1 and SQLAlchemy raises StaleDataError later.
-            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
+    apply_sql_script(FIX_PATH)
 
 
 @pytest.fixture(scope="module")

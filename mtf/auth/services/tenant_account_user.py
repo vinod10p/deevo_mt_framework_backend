@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -22,15 +21,13 @@ from mtf.auth.services.membership_rbac import (
     revoke_account_user_roles,
     sync_account_user_role,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, forbidden, not_found, row_version_conflict
 from mtf.shared.security import generate_id, hash_password
+from mtf.tenant.business_units import root_unit_id
 from mtf.tenant.models import TenantAccount
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TenantAccountUserService:
@@ -217,7 +214,7 @@ class TenantAccountUserService:
 
         email_norm = str(data.email).strip().lower()
         existing = self._get_active_user_by_email(email_norm)
-        now = _utc_naive_now()
+        now = utc_now()
         password = getattr(data, "password", None) or None
 
         if existing is not None:
@@ -285,15 +282,14 @@ class TenantAccountUserService:
                 account_id=account_id,
             )
 
-        row = TenantAccountUser(
-            id=generate_id(),
+        row = TenantAccountUser.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=root_unit_id(self._db, tenant_id),
             account_id=account_id,
             user_id=user.id,
             role=data.role,
             joined_at=now,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -363,7 +359,7 @@ class TenantAccountUserService:
                 if data.role is not None or data.is_active is not None:
                     conflict("TENANT_ACCOUNT_USER", "Cannot change your own role or status")
 
-        now = _utc_naive_now()
+        now = utc_now()
         before_row = row_snapshot(row)
         before_user = row_snapshot(user)
 
@@ -445,7 +441,7 @@ class TenantAccountUserService:
         account_id: str,
         user_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -464,13 +460,7 @@ class TenantAccountUserService:
 
         before = row_snapshot(row)
         row.is_active = False
-        row.is_deleted = True
-        row.deleted_by = deleted_by
-        row.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            row.updated_by = deleted_by
-
-        self._db.add(row)
+        row.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=row,

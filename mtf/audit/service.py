@@ -17,6 +17,7 @@ from mtf.audit.schemas import DATA_CHANGE_ACTIONS, AuditAction, AuditLogCreate
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import forbidden
 from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 
 _UNSET = object()
 
@@ -136,13 +137,19 @@ def append_audit_log(
     new_values: Mapping[str, Any] | None = None,
     reason: str | None = None,
     tenant_id: Any = _UNSET,
+    business_unit_id: Any = _UNSET,
     account_id: Any = _UNSET,
     session_id: Any = _UNSET,
     user_id: Any = _UNSET,
     user_type: Any = _UNSET,
     request_id: Any = _UNSET,
 ) -> AuditLog:
-    """Add an ``audit.audit_log`` row. Does not commit — caller owns the transaction."""
+    """Add an ``audit.audit_log`` row. Does not commit — caller owns the transaction.
+
+    Identity defaults come from ``actor`` and ``source``. ``business_unit_id`` defaults to
+    the actor's current unit, else the tenant's root unit (``CK_audit_log_tenant_bu``:
+    set exactly when ``tenant_id`` is set).
+    """
     source = source or AuditSource()
     _require_data_change_shape(
         action, schema_name, table_name, record_id, old_values, new_values
@@ -150,6 +157,8 @@ def append_audit_log(
 
     if tenant_id is _UNSET:
         tenant_id = actor.tenant_id if actor is not None else None
+    if business_unit_id is _UNSET:
+        business_unit_id = _default_business_unit_id(db, actor, tenant_id)
     if account_id is _UNSET:
         account_id = actor.account_id if actor is not None else None
     if user_id is _UNSET:
@@ -164,6 +173,7 @@ def append_audit_log(
     log = AuditLog(
         id=generate_id(),
         tenant_id=tenant_id,
+        business_unit_id=business_unit_id,
         account_id=account_id,
         session_id=session_id,
         request_id=request_id,
@@ -181,6 +191,16 @@ def append_audit_log(
     )
     db.add(log)
     return log
+
+
+def _default_business_unit_id(
+    db: Session, actor: CurrentUser | None, tenant_id: str | None
+) -> str | None:
+    if tenant_id is None:
+        return None
+    if actor is not None and actor.tenant_id == tenant_id and actor.business_unit_id:
+        return actor.business_unit_id
+    return root_unit_id(db, tenant_id)
 
 
 def _identity_kwargs(*, tenant_id: Any, account_id: Any) -> dict[str, Any]:
@@ -410,6 +430,7 @@ class AuditLogService:
             new_values=new,
             reason=data.reason,
             tenant_id=data.tenant_id,
+            business_unit_id=data.business_unit_id,
             account_id=data.account_id,
             session_id=data.session_id,
             user_id=data.user_id,

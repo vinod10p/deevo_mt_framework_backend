@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,18 +12,15 @@ from mtf.audit.service import (
     audit_update,
     row_snapshot,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import not_found, row_version_conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 from mtf.tenant.models import TenantAccount, TenantAccountAddress
 from mtf.tenant.schemas.tenant_account_address import (
     TenantAccountAddressCreate,
     TenantAccountAddressUpdate,
 )
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TenantAccountAddressService:
@@ -61,7 +56,7 @@ class TenantAccountAddressService:
         )
         if keep_address_id is not None:
             stmt = stmt.where(TenantAccountAddress.id != keep_address_id)
-        now = _utc_naive_now()
+        now = utc_now()
         for addr in self._db.scalars(stmt):
             before = row_snapshot(addr)
             addr.is_default = False
@@ -148,12 +143,11 @@ class TenantAccountAddressService:
                 source=source,
             )
 
-        row = TenantAccountAddress(
-            id=generate_id(),
+        row = TenantAccountAddress.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=root_unit_id(self._db, tenant_id),
             account_id=account_id,
-            created_by=created_by,
-            updated_by=created_by,
             **data.model_dump(),
         )
         self._db.add(row)
@@ -201,7 +195,7 @@ class TenantAccountAddressService:
         for key, value in updates.items():
             setattr(row, key, value)
 
-        row.updated_at = _utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 
@@ -227,7 +221,7 @@ class TenantAccountAddressService:
         account_id: str,
         address_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -238,13 +232,7 @@ class TenantAccountAddressService:
             row_version_conflict("TENANT_ACCOUNT_ADDRESS")
 
         before = row_snapshot(row)
-        row.is_deleted = True
-        row.deleted_by = deleted_by
-        row.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            row.updated_by = deleted_by
-
-        self._db.add(row)
+        row.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=row,

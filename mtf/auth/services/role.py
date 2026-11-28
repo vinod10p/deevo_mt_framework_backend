@@ -18,11 +18,10 @@ from mtf.auth.services.rbac_catalog import (
     apply_soft_delete,
     commit_or_conflict,
     require_platform_role,
-    utc_naive_now,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, row_version_conflict
-from mtf.shared.security import generate_id
 
 
 class RoleService:
@@ -68,16 +67,14 @@ class RoleService:
         if self._live_platform_by_code(data.code) is not None:
             conflict("AUTH_ROLE", "Platform role code already exists")
 
-        row = Role(
-            id=generate_id(),
+        row = Role.new(
+            by=created_by,
             tenant_id=None,
             code=data.code,
             name=data.name,
             description=data.description,
             user_scope=data.user_scope,
             is_system=True,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -113,7 +110,7 @@ class RoleService:
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(row, key, value)
-        row.updated_at = utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 

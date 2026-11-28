@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 from mtf.tenant.models.tenant_setting import TenantSetting
 
 RBAC_SCREENS_KEY = "rbac.screens"
@@ -47,13 +47,12 @@ def enable_screen_rbac(
     if existing is not None:
         return False
     db.add(
-        TenantSetting(
-            id=generate_id(),
+        TenantSetting.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=root_unit_id(db, tenant_id),
             key=RBAC_SCREENS_KEY,
             value=RBAC_SCREENS_ON,
-            created_by=created_by,
-            updated_by=created_by,
         )
     )
     return True

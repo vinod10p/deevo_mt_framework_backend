@@ -23,11 +23,10 @@ from mtf.auth.services.rbac_catalog import (
     require_export_needs_view,
     require_platform_report,
     require_template_role,
-    utc_naive_now,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
-from mtf.shared.security import generate_id
 
 
 class DefaultRoleReportService:
@@ -88,14 +87,12 @@ class DefaultRoleReportService:
                 "Default report grant already exists for this role",
             )
 
-        row = DefaultRoleReport(
-            id=generate_id(),
+        row = DefaultRoleReport.new(
+            by=created_by,
             role_id=role.id,
             report_id=data.report_id,
             can_view=data.can_view,
             can_export=data.can_export,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -136,7 +133,7 @@ class DefaultRoleReportService:
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(row, key, value)
-        row.updated_at = utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 

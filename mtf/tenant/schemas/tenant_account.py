@@ -51,6 +51,7 @@ class TenantAccountRead(BaseModel):
 
     id: str
     tenant_id: str
+    business_unit_id: str
     account_code: str
     account_type: str
     name: str

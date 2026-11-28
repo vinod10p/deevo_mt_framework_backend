@@ -11,11 +11,17 @@ from fastapi import HTTPException
 from mtf.auth.schemas.session import RefreshRequest
 from mtf.auth.services.session_service import SessionService
 from mtf.shared import security
+from mtf.tenant.models.business_unit import BU_TYPE_ROOT, BU_TYPE_STORE, BusinessUnit
+from mtf.tenant.services.business_unit_service import StoreAccessError
 
 USER_ID = "01JUSER0000000000000000001"
 SESSION_ID = "01JSESS0000000000000000001"
 TENANT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE0"
 ACCOUNT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE1"
+STORE = BusinessUnit(id="01HZYJZGXM0KV0K4T8Y9STORE1", tenant_id=TENANT_ID,
+                     bu_type=BU_TYPE_STORE, code="MAIN", name="Main Store")
+ROOT = BusinessUnit(id="01HZYJZGXM0KV0K4T8Y9ROOT01", tenant_id=TENANT_ID,
+                    bu_type=BU_TYPE_ROOT, code="COMPANY", name="Acme")
 
 
 def _tenant(**kwargs: object) -> MagicMock:
@@ -32,12 +38,14 @@ def _setup(
     tenant: MagicMock | None,
     membership: object | None = "membership",
     session_tenant: str | None = TENANT_ID,
+    store_open: bool = True,
 ) -> tuple[SessionService, MagicMock, MagicMock]:
     db = MagicMock()
     db.scalars.return_value.first.return_value = tenant  # read by _usable_tenant
     session = MagicMock()
     session.id, session.user_id, session.tenant_id = SESSION_ID, USER_ID, session_tenant
     session.is_active = True
+    session.business_unit_id = {"tenant": STORE.id, "tenant_account": ROOT.id}.get(scope)
     session.refresh_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
         days=1
     )
@@ -49,6 +57,12 @@ def _setup(
     patch.object(service, "_require_single_account_membership", return_value=ACCOUNT_ID).start()
     patch.object(service, "_account_name", return_value="Acct").start()
     patch.object(service, "_tenant_name", return_value="Acme").start()
+    units = patch.object(service, "_units").start()
+    units.recheck_session_unit.side_effect = (
+        (lambda *_: STORE) if store_open else StoreAccessError("store_denied")
+    )
+    units.get_root.return_value = ROOT
+    units.is_multi_store.return_value = False
     return service, db, session
 
 
@@ -81,9 +95,18 @@ def _assert_rejected_and_revoked(service, db, session, reason: str) -> None:
 def test_active_staff_member_can_refresh() -> None:
     service, db, session = _setup("tenant", tenant=_tenant())
     out = _refresh(service)
-    assert security.decode_access_token(out.access_token)["tenant_id"] == TENANT_ID
+    claims = security.decode_access_token(out.access_token)
+    assert (claims["tenant_id"], claims["business_unit_id"]) == (TENANT_ID, STORE.id)
+    assert (out.business_unit_id, out.business_unit_code) == (STORE.id, "MAIN")
     assert session.is_active is True
     service._get_active_tenant_membership.assert_called_once_with(USER_ID, TENANT_ID)
+    service._units.recheck_session_unit.assert_called_once_with(TENANT_ID, USER_ID, STORE.id)
+
+
+def test_lost_store_access_ends_the_session() -> None:
+    """Store deactivated or the user's role there removed: no fallback to another store."""
+    service, db, session = _setup("tenant", tenant=_tenant(), store_open=False)
+    _assert_rejected_and_revoked(service, db, session, "store_access_removed")
 
 
 def test_removed_staff_member_cannot_refresh_and_session_ends() -> None:
@@ -122,6 +145,7 @@ def test_portal_user_with_active_tenant_can_refresh() -> None:
     service, db, session = _setup("tenant_account", tenant=_tenant())
     out = _refresh(service)
     assert security.decode_access_token(out.access_token)["account_id"] == ACCOUNT_ID
+    assert out.business_unit_type == "root"
     service._get_active_tenant_membership.assert_not_called()  # portal uses account check
 
 
@@ -129,6 +153,7 @@ def test_system_user_skips_tenant_checks() -> None:
     service, db, session = _setup("system", tenant=None, session_tenant=None)
     out = _refresh(service)
     assert security.decode_access_token(out.access_token)["user_scope"] == "system"
+    assert out.business_unit_id is None
     service._get_active_tenant_membership.assert_not_called()
     assert session.is_active is True
 

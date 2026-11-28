@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text
@@ -16,42 +15,17 @@ from mtf.auth.models.role_permission import RolePermission
 from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.database import SessionLocal, engine
 from tests.auth.test_rbac_seed import EXPECTED_PERMISSIONS, EXPECTED_ROLES, SEED_PATH
+from tests.sql_scripts import apply_sql_script
 
 pytestmark = pytest.mark.integration
 
 _MTF_REPORT = "tenant_account_list"
 
 
-def _batches(sql: str) -> list[str]:
-    batches: list[str] = []
-    current: list[str] = []
-    for line in sql.splitlines():
-        if line.strip().upper() == "GO":
-            batch = "\n".join(current).strip()
-            if batch:
-                batches.append(batch)
-            current = []
-        else:
-            current.append(line)
-    tail = "\n".join(current).strip()
-    if tail:
-        batches.append(tail)
-    return batches
 
 
 def _apply_seed() -> None:
-    sql = Path(SEED_PATH).read_text(encoding="utf-8")
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        try:
-            for batch in _batches(sql):
-                stripped = batch.lstrip()
-                if stripped.upper().startswith("USE "):
-                    continue
-                conn.execute(text(batch))
-        finally:
-            # Scripts set NOCOUNT ON; a pooled connection that keeps it makes
-            # SQLAlchemy see rowcount -1 (StaleDataError) in later tests.
-            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
+    apply_sql_script(SEED_PATH)
 
 
 @pytest.fixture(scope="module")

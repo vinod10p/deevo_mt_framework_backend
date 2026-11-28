@@ -11,7 +11,6 @@ from main import app
 from mtf.shared.deps import CurrentUser, get_current_user
 from mtf.tenant.api.tenant import get_tenant_user_service
 from mtf.tenant.schemas import TenantUserCreate, TenantUserUpdate
-
 from tests.tenant.conftest import (
     TEST_SYSTEM_USER_ID,
     TEST_TENANT_ID,

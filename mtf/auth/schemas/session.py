@@ -14,6 +14,14 @@ class LoginRequest(BaseModel):
     password: str
     created_from: CreatedFrom = "web"
     tenant_id: str | None = None
+    #: Store typed at login: required for tenant staff, ignored for portal and system users.
+    business_unit_code: str | None = Field(None, max_length=30)
+
+
+class BusinessUnitSwitchRequest(BaseModel):
+    """``POST /auth/session/business-unit`` — the store code, typed as at login."""
+
+    business_unit_code: str = Field(..., max_length=30)
 
 
 class AccessTokenResponse(BaseModel):
@@ -28,6 +36,13 @@ class AccessTokenResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     tenant_name: str | None = None
+    #: The session's business unit (portal users: the tenant root; system users: none).
+    business_unit_id: str | None = None
+    business_unit_code: str | None = None
+    business_unit_name: str | None = None
+    business_unit_type: str | None = None
+    #: The tenant has more than one active store, so the app shows the store switcher.
+    multi_store: bool = False
 
 
 class BrowserTokenResponse(AccessTokenResponse):

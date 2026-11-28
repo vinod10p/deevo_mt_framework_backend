@@ -27,6 +27,7 @@ class AuditLogCreate(BaseModel):
 
     id: Optional[str] = None
     tenant_id: Optional[str] = None
+    business_unit_id: Optional[str] = None
     account_id: Optional[str] = None
     session_id: Optional[str] = None
     request_id: Optional[str] = None
@@ -48,6 +49,7 @@ class AuditLogRead(BaseModel):
 
     id: str
     tenant_id: Optional[str] = None
+    business_unit_id: Optional[str] = None
     account_id: Optional[str] = None
     session_id: Optional[str] = None
     request_id: Optional[str] = None

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ulid import ULID
@@ -11,13 +9,10 @@ from ulid import ULID
 from mtf.audit.service import AuditSource, audit_insert, audit_update, row_snapshot
 from mtf.auth.models import User
 from mtf.auth.schemas import UserCreate, UserUpdate
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
 from mtf.shared.security import hash_password
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class UserService:
@@ -60,7 +55,7 @@ class UserService:
                 detail={"code": "EMAIL_IN_USE", "message": "Email already registered"},
             )
 
-        now = _utc_naive_now()
+        now = utc_now()
         user = User(
             id=str(ULID()),
             email=normalized,
@@ -104,7 +99,7 @@ class UserService:
         if user.row_version != data.row_version:
             row_version_conflict("USER")
 
-        now = _utc_naive_now()
+        now = utc_now()
         before = row_snapshot(user)
         updates = data.model_dump(exclude_none=True, exclude={"row_version", "password"})
         if "email" in updates:

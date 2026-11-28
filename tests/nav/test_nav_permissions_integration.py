@@ -10,10 +10,10 @@ from main import app
 from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
+from tests.staff_login import staff_headers
 from tests.tenant.rbac_fixtures import assign_role, create_member, custom_role
 from tests.tenant.test_tenant_multi_role_integration import (
     _cleanup,
-    _login,
     _setup,
     stub_system_user,  # noqa: F401
 )
@@ -68,7 +68,7 @@ def test_menu_follows_roles_and_report_grants(client: TestClient) -> None:
     user_ids = [ctx["owner_user_id"]]
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        admin = _login(
+        admin = staff_headers(
             client, email=ctx["owner_email"], password="OwnerSecret123!", tenant_id=tenant_id
         )
 
@@ -82,7 +82,7 @@ def test_menu_follows_roles_and_report_grants(client: TestClient) -> None:
         # Empty member: no modules.
         member_id, member_email = create_member(client, admin)
         user_ids.append(member_id)
-        member = _login(
+        member = staff_headers(
             client, email=member_email, password="MemberSecret123!", tenant_id=tenant_id
         )
         assert _modules(client, member) == []
@@ -91,7 +91,7 @@ def test_menu_follows_roles_and_report_grants(client: TestClient) -> None:
         # Screen permissions open matching screen items only.
         part_id, part_email = create_member(client, admin)
         user_ids.append(part_id)
-        part = _login(client, email=part_email, password="MemberSecret123!", tenant_id=tenant_id)
+        part = staff_headers(client, part_email, tenant_id, password="MemberSecret123!")
         role = custom_role(client, admin, "partial", ["screen.note.view", "menu.wf_inbox.view"])
         assign_role(client, admin, part_id, role["id"])
         assert _modules(client, part) == ["CRM", "WF"]
@@ -110,7 +110,7 @@ def test_menu_follows_roles_and_report_grants(client: TestClient) -> None:
 
         only_id, only_email = create_member(client, admin)
         user_ids.append(only_id)
-        only = _login(client, email=only_email, password="MemberSecret123!", tenant_id=tenant_id)
+        only = staff_headers(client, only_email, tenant_id, password="MemberSecret123!")
         crm_only = custom_role(client, admin, "crmonly", ["screen.lead.view", "screen.lead.create"])
         assign_role(client, admin, only_id, crm_only["id"])
         r = client.get("/api/nav/modules", headers=only)

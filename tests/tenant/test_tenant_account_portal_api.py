@@ -14,13 +14,12 @@ from mtf.tenant.api.tenant_account_portal import (
     get_tenant_account_user_service,
     require_account_admin,
 )
-
 from tests.tenant.conftest import (
+    _NOW,
+    _ROW_VER,
     TEST_ACCOUNT_ID,
     TEST_TENANT_ID,
     TEST_USER_ID,
-    _NOW,
-    _ROW_VER,
     minimal_tenant_account_user_detail,
 )
 

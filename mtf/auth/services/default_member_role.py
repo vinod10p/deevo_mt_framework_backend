@@ -7,8 +7,6 @@ membership row lock that staff profile updates take.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,12 +29,9 @@ from mtf.auth.services.rbac_assignment import (
     assert_not_last_admin,
     permission_codes_for_role,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def is_default_member_template(role: Role) -> bool:
@@ -136,7 +131,7 @@ class DefaultMemberRoleService:
 
         before = row_snapshot(row)
         row.default_member_role_enabled = enabled
-        row.updated_at = _utc_naive_now()
+        row.updated_at = utc_now()
         row.updated_by = actor.user_id
         self._db.add(row)
         audit_update(

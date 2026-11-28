@@ -1,71 +1,30 @@
-"""SQLAlchemy model — `txn.screen_field_config`."""
+"""SQLAlchemy model — ``txn.screen_field_config``."""
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Unicode, text
-from sqlalchemy.dialects.mssql import ROWVERSION
+from sqlalchemy import Boolean, Integer, Unicode
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.schema import FetchedValue
 
 from mtf.shared.database import Base
+from mtf.shared.model_columns import (
+    TENANT_FK,
+    StandardColumnsMixin,
+    business_unit_fk,
+    ulid,
+    ulid_pk,
+)
 
-_DT_UTC = DateTime(timezone=False)
 
-
-class ScreenFieldConfig(Base):
-    """Tenant presentation override — display_name, display_order, is_displayed only."""
+class ScreenFieldConfig(StandardColumnsMixin, Base):
+    """Tenant presentation override of a screen field: display name, order and visibility."""
 
     __tablename__ = "screen_field_config"
-    __table_args__ = {"schema": "txn"}
+    __table_args__ = (business_unit_fk("screen_field_config"), {"schema": "txn"})
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("tenant.tenant.id"),
-        nullable=False,
-    )
-    field_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("txn.screen_field.id"),
-        nullable=False,
-    )
+    id: Mapped[str] = ulid_pk()
+    tenant_id: Mapped[str] = ulid(TENANT_FK)
+    business_unit_id: Mapped[str] = ulid()
+    field_id: Mapped[str] = ulid("txn.screen_field.id")
     display_name: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
     display_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_displayed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
-    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-
-    row_version: Mapped[bytes] = mapped_column(
-        ROWVERSION,
-        nullable=False,
-        server_default=FetchedValue(),
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    created_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    updated_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(_DT_UTC, nullable=True)
-    deleted_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )

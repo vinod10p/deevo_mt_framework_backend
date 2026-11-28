@@ -1,4 +1,4 @@
-"""Tenant staff ``auth.user_role`` assignments."""
+"""Tenant staff ``auth.user_role`` assignments — a role is held at the root or at one store."""
 
 from __future__ import annotations
 
@@ -27,7 +27,10 @@ from mtf.auth.services.rbac_assignment import (
 from mtf.auth.services.rbac_catalog import apply_soft_delete, commit_or_conflict
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
+from mtf.tenant.services.business_unit_service import BusinessUnitService
+
+_STORE_ONLY = "This role can only be assigned to a store"
 
 
 def _reject_membership_template(role: Role) -> None:
@@ -71,16 +74,37 @@ class UserRoleService:
         )
         return list(self._db.scalars(stmt).all())
 
-    def _live_assignment(self, tenant_id: str, user_id: str, role_id: str) -> UserRole | None:
-        return self._db.scalars(
-            select(UserRole).where(
-                UserRole.tenant_id == tenant_id,
-                UserRole.user_id == user_id,
-                UserRole.account_id.is_(None),
-                UserRole.role_id == role_id,
-                UserRole.is_deleted == False,  # noqa: E712
-            )
-        ).first()
+    def _live_assignments(
+        self, tenant_id: str, user_id: str, role_id: str, business_unit_id: str | None = None
+    ) -> list[UserRole]:
+        """The user's live rows for ``role_id`` — at one unit, or at every unit."""
+        stmt = select(UserRole).where(
+            UserRole.tenant_id == tenant_id,
+            UserRole.user_id == user_id,
+            UserRole.account_id.is_(None),
+            UserRole.role_id == role_id,
+            UserRole.is_deleted == False,  # noqa: E712
+        )
+        if business_unit_id is not None:
+            stmt = stmt.where(UserRole.business_unit_id == business_unit_id)
+        return list(self._db.scalars(stmt))
+
+    def _assignment_unit(
+        self, tenant_id: str, user_id: str, role: Role, requested_id: str | None
+    ) -> str:
+        """Where the new assignment is held (decision 10: root only for tenant-wide roles)."""
+        root_id = root_unit_id(self._db, tenant_id)
+        if requested_id is None:
+            if role.is_tenant_wide:
+                return root_id
+            requested_id = BusinessUnitService(self._db).default_store_id(tenant_id, user_id)
+            if requested_id is None:
+                conflict("AUTH_ROLE", _STORE_ONLY)
+        elif BusinessUnitService(self._db).get_active(tenant_id, requested_id) is None:
+            not_found("TENANT_BUSINESS_UNIT", "Business unit not found")
+        if requested_id == root_id and not role.is_tenant_wide:
+            conflict("AUTH_ROLE", _STORE_ONLY)
+        return requested_id
 
     def create(
         self,
@@ -105,18 +129,18 @@ class UserRoleService:
             permission_codes_for_role(self._db, role.id),
             db=self._db,
         )
-        if self._live_assignment(tenant_id, user_id, role.id) is not None:
+        unit_id = self._assignment_unit(tenant_id, user_id, role, data.business_unit_id)
+        if self._live_assignments(tenant_id, user_id, role.id, unit_id):
             conflict("AUTH_USER_ROLE", "User already holds this role")
 
-        row = UserRole(
-            id=generate_id(),
+        row = UserRole.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=unit_id,
             user_id=user_id,
             account_id=None,
             role_id=role.id,
             user_scope="tenant",
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -142,14 +166,22 @@ class UserRoleService:
         user_id: str,
         role_id: str,
         *,
+        business_unit_id: str | None = None,
         deleted_by: str,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
     ) -> UserRole:
+        """Revoke the role at ``business_unit_id`` (may be omitted if held at one unit only)."""
         require_active_tenant_membership(self._db, tenant_id, user_id)
-        row = self._live_assignment(tenant_id, user_id, role_id)
-        if row is None:
+        rows = self._live_assignments(tenant_id, user_id, role_id, business_unit_id)
+        if not rows:
             not_found("AUTH_USER_ROLE", "Role assignment not found")
+        if len(rows) > 1:
+            conflict(
+                "AUTH_USER_ROLE",
+                "The user holds this role at more than one store; name the business unit",
+            )
+        row = rows[0]
         role = self._db.get(Role, role_id)
         if role is not None:
             _reject_membership_template(role)

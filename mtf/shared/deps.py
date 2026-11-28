@@ -59,6 +59,9 @@ class CurrentUser:
     user_scope: UserScope
     tenant_id: str | None
     account_id: str | None = None
+    #: Unit the session is working in, read from the session row (root for portal users,
+    #: None for system users). The token's ``business_unit_id`` claim is not trusted.
+    business_unit_id: str | None = None
 
 
 http_bearer = HTTPBearer(auto_error=True)
@@ -101,8 +104,9 @@ def get_current_user(
 
     # One PK lookup: the session is live, this is its *current* access token (refresh
     # rotation and logout both invalidate older ones), and the user is still active.
+    # It also reads the session's business unit, the source of truth for the store.
     stmt = (
-        select(AuthSession.token_hash)
+        select(AuthSession.token_hash, AuthSession.business_unit_id)
         .join(User, User.id == AuthSession.user_id)
         .where(
             AuthSession.id == session_id,
@@ -115,8 +119,8 @@ def get_current_user(
         )
         .limit(1)
     )
-    current_hash = db.scalars(stmt).first()
-    if current_hash is None or not hmac.compare_digest(current_hash, hash_token(token)):
+    session = db.execute(stmt).first()
+    if session is None or not hmac.compare_digest(session.token_hash, hash_token(token)):
         unauthorized("AUTH", "Session expired or revoked")
 
     tenant_raw = claims.get("tenant_id")
@@ -131,6 +135,7 @@ def get_current_user(
         user_scope=user_scope,
         tenant_id=tenant_id,
         account_id=account_id,
+        business_unit_id=session.business_unit_id,
     )
 
     # Removed / deactivated members lose access immediately, not when the JWT expires.
@@ -193,6 +198,13 @@ def get_tenant_id(user: CurrentUser = Depends(require_scope("tenant"))) -> str:
     if user.tenant_id is None:
         forbidden("AUTH", "Tenant context required")
     return user.tenant_id
+
+
+def get_business_unit_id(user: CurrentUser = Depends(require_scope("tenant"))) -> str:
+    """Business unit of the caller's session — never taken from the request."""
+    if user.business_unit_id is None:
+        unauthorized("AUTH", "Store context required")
+    return user.business_unit_id
 
 
 def get_tenant_id_portal(

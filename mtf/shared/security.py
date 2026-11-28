@@ -53,12 +53,14 @@ def create_access_token(
     account_id: str | None = None,
     *,
     session_id: str | None = None,
+    business_unit_id: str | None = None,
 ) -> str:
     """Encode a signed access JWT.
 
     Payload includes ``typ="access"``, ``user_id``, ``user_type``, ``user_scope``,
     ``tenant_id`` (may be JSON null), optional ``account_id`` (portal users), ``sid`` (the
-    ``auth.session.id`` — required by ``get_current_user``), ``exp`` (UTC expiry),
+    ``auth.session.id`` — required by ``get_current_user``), optional ``business_unit_id``
+    (informational: the session row is the source of truth), ``exp`` (UTC expiry),
     and ``jti`` (new ULID).
 
     Uses ``jwt_access_token_expire_minutes``, ``jwt_algorithm``, and
@@ -83,6 +85,8 @@ def create_access_token(
         payload["account_id"] = account_id
     if session_id is not None:
         payload["sid"] = session_id
+    if business_unit_id is not None:
+        payload["business_unit_id"] = business_unit_id
     return jwt.encode(
         payload,
         settings.jwt_secret_key.get_secret_value(),

@@ -7,6 +7,7 @@ from datetime import datetime
 import pytest
 
 from mtf.tenant.models import Tenant, TenantAccount, TenantAccountAddress
+from tests.conftest import TEST_BUSINESS_UNIT_ID
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,8 @@ TEST_ACCOUNT_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE1"
 TEST_ADDRESS_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE2"
 TEST_USER_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE3"
 TEST_SYSTEM_USER_ID = "01HZYJZGXM0KV0K4T8Y9ABCDE4"
+#: Root business unit of TEST_TENANT_ID (tenant-wide rows live here).
+TEST_ROOT_BU_ID = TEST_BUSINESS_UNIT_ID
 SEEDED_SYSTEM_USER_ID = "01HYSTEM00000000000000000"
 
 
@@ -75,6 +78,7 @@ def minimal_tenant_account(**kwargs: object) -> TenantAccount:
     base: dict[str, object] = {
         "id": TEST_ACCOUNT_ID,
         "tenant_id": TEST_TENANT_ID,
+        "business_unit_id": TEST_ROOT_BU_ID,
         "account_code": "A001",
         "account_type": "customer",
         "name": "Acme Corp",
@@ -90,6 +94,7 @@ def minimal_tenant_account(**kwargs: object) -> TenantAccount:
         "updated_at": _NOW,
         "created_by": None,
         "updated_by": None,
+        "deleted_at": None,
         "deleted_by": None,
     }
     base.update(kwargs)
@@ -100,6 +105,7 @@ def minimal_tenant_account_address(**kwargs: object) -> TenantAccountAddress:
     base: dict[str, object] = {
         "id": TEST_ADDRESS_ID,
         "tenant_id": TEST_TENANT_ID,
+        "business_unit_id": TEST_ROOT_BU_ID,
         "account_id": TEST_ACCOUNT_ID,
         "address_type": "billing",
         "is_default": False,
@@ -116,6 +122,7 @@ def minimal_tenant_account_address(**kwargs: object) -> TenantAccountAddress:
         "updated_at": _NOW,
         "created_by": None,
         "updated_by": None,
+        "deleted_at": None,
         "deleted_by": None,
     }
     base.update(kwargs)

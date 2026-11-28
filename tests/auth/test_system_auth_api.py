@@ -8,12 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from main import app
 from mtf.auth.api.app_user import get_user_service
 from mtf.auth.api.session import get_user_service as get_me_user_service
 from mtf.auth.models.user import User
-from main import app
 from mtf.shared.deps import CurrentUser, get_current_user, get_permission_resolver
-
 from tests.tenant.conftest import TEST_SYSTEM_USER_ID
 
 _DENYLIST = frozenset(

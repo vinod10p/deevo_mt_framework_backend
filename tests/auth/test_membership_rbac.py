@@ -17,6 +17,7 @@ from mtf.auth.services.membership_rbac import (
     sync_tenant_user_role,
     template_role_code,
 )
+from tests.conftest import TEST_BUSINESS_UNIT_ID
 
 _MOD = "mtf.auth.services.membership_rbac"
 
@@ -46,7 +47,6 @@ def test_sync_admin_assigns_tenant_admin() -> None:
         patch(f"{_MOD}.require_platform_role", return_value=admin) as require,
         patch(f"{_MOD}._live_assignments", return_value=[]),
         patch(f"{_MOD}.audit_insert"),
-        patch(f"{_MOD}.generate_id", return_value="01JNEWSYNC000000000000001"),
     ):
         sync_tenant_user_role(
             db,
@@ -56,7 +56,10 @@ def test_sync_admin_assigns_tenant_admin() -> None:
             actor_id="actor",
         )
     require.assert_called_once_with(db, code="tenant_admin", user_scope="tenant")
-    assert db.add.called
+    (assignment,) = db.add.call_args.args
+    assert assignment.role_id == admin.id
+    # Membership templates apply in every store, so they are written at the root unit.
+    assert assignment.business_unit_id == TEST_BUSINESS_UNIT_ID
 
 
 def test_sync_member_revokes_templates_and_assigns_nothing() -> None:

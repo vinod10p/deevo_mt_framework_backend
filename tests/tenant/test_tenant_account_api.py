@@ -15,7 +15,6 @@ from mtf.tenant.api.tenant_account import (
     get_tenant_account_user_service,
 )
 from mtf.tenant.api.tenant_staff import require_owner_or_admin
-
 from tests.tenant.conftest import (
     TEST_ACCOUNT_ID,
     TEST_ADDRESS_ID,

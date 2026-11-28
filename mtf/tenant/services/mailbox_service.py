@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Never
 
 import httpx
@@ -19,6 +19,7 @@ from mtf.audit.service import (
     audit_update,
     row_snapshot,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.config import get_settings
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request
@@ -76,7 +77,7 @@ class MailboxService:
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
     ) -> Mailbox:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = utc_now()
         mailbox = Mailbox(
             id=str(ULID()),
             tenant_id=tenant_id,
@@ -119,7 +120,7 @@ class MailboxService:
         mailbox = self.get_by_id(tenant_id, mailbox_id)
         if not mailbox:
             return None
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = utc_now()
         before = row_snapshot(mailbox)
         if payload.display_name is not None:
             mailbox.display_name = payload.display_name
@@ -155,7 +156,7 @@ class MailboxService:
         mailbox = self.get_by_id(tenant_id, mailbox_id)
         if not mailbox:
             return False
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = utc_now()
         before = row_snapshot(mailbox)
         mailbox.is_deleted = True
         mailbox.deleted_at = now
@@ -250,7 +251,7 @@ class MailboxService:
                 f"({check.status_code}): {check.text}"
             )
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = utc_now()
         expires_at = now + timedelta(seconds=int(expires_in))
 
         # Look up existing credential or create new one
@@ -311,7 +312,7 @@ class MailboxService:
         if not cred or not cred.access_token or not cred.refresh_token:
             return None
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = utc_now()
         if cred.access_token_expires_at and cred.access_token_expires_at > (now + timedelta(minutes=5)):
             return cred.access_token
 

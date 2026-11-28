@@ -1,36 +1,33 @@
-"""SQLAlchemy model — `tenant.tenant_account_address`."""
+"""SQLAlchemy model — ``tenant.tenant_account_address``."""
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Unicode, text
-from sqlalchemy.dialects.mssql import ROWVERSION
+from sqlalchemy import String, Unicode
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.schema import FetchedValue
 
 from mtf.shared.database import Base
+from mtf.shared.model_columns import (
+    TENANT_FK,
+    StandardColumnsMixin,
+    business_unit_fk,
+    flag,
+    ulid,
+    ulid_pk,
+)
 
-_DT_UTC = DateTime(timezone=False)
 
-
-class TenantAccountAddress(Base):
-    """Address row for a tenant account."""
+class TenantAccountAddress(StandardColumnsMixin, Base):
+    """An address of a tenant account; ``business_unit_id`` matches its account (root)."""
 
     __tablename__ = "tenant_account_address"
-    __table_args__ = {"schema": "tenant"}
+    __table_args__ = (business_unit_fk("tenant_account_address"), {"schema": "tenant"})
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(26), ForeignKey("tenant.tenant.id"), nullable=False)
-    account_id: Mapped[str] = mapped_column(
-        String(26),
-        ForeignKey("tenant.tenant_account.id"),
-        nullable=False,
-    )
-
+    id: Mapped[str] = ulid_pk()
+    tenant_id: Mapped[str] = ulid(TENANT_FK)
+    business_unit_id: Mapped[str] = ulid()
+    account_id: Mapped[str] = ulid("tenant.tenant_account.id")
     address_type: Mapped[str] = mapped_column(Unicode(50), nullable=False)
-    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-
+    is_default: Mapped[bool] = flag(default=False)
     address_line1: Mapped[str] = mapped_column(Unicode(255), nullable=False)
     address_line2: Mapped[str | None] = mapped_column(Unicode(255), nullable=True)
     city: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
@@ -38,36 +35,8 @@ class TenantAccountAddress(Base):
     postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     country: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
-    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
-
-    row_version: Mapped[bytes] = mapped_column(
-        ROWVERSION,
-        nullable=False,
-        server_default=FetchedValue(),
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    created_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    updated_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    deleted_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
+    def __repr__(self) -> str:
+        return (
+            f"<TenantAccountAddress id={self.id!r} account_id={self.account_id!r} "
+            f"address_type={self.address_type!r}>"
+        )

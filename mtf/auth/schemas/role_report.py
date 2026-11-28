@@ -46,6 +46,7 @@ class RoleReportRead(BaseModel):
 
     id: str
     tenant_id: str
+    business_unit_id: str
     role_id: str
     report_id: str
     can_view: bool

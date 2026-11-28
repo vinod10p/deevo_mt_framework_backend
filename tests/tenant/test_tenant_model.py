@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy.orm import configure_mappers
 
 from mtf.tenant.models.tenant import Tenant
-
 from tests.tenant.conftest import minimal_tenant
 
 

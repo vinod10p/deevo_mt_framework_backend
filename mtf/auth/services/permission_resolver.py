@@ -3,6 +3,9 @@
 Permission codes are not in the JWT. This service runs one query per kind
 (codes, report grants) and memoizes the result on the instance — FastAPI
 reuses one instance per request via ``get_permission_resolver``.
+
+Tenant staff get the roles held at the tenant's root unit (every store) plus the roles held
+at the session's store; in "All stores" mode (session unit = root) only root roles count.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlalchemy import Select, and_, select
+from sqlalchemy import ColumnElement, Select, and_, or_, select
 from sqlalchemy.orm import Session
 
 from mtf.auth.models.permission import Permission
@@ -20,6 +23,7 @@ from mtf.auth.models.role_report import RoleReport
 from mtf.auth.models.tenant_account_user import TenantAccountUser
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user_role import UserRole
+from mtf.tenant.models.business_unit import BU_TYPE_ROOT, BusinessUnit
 
 
 class Actor(Protocol):
@@ -29,6 +33,7 @@ class Actor(Protocol):
     user_scope: str
     tenant_id: str | None
     account_id: str | None
+    business_unit_id: str | None
 
 
 @dataclass(frozen=True)
@@ -40,11 +45,13 @@ class ReportGrant:
     can_export: bool
 
 
-_ActorKey = tuple[str, str, str | None, str | None]
+_ActorKey = tuple[str, str, str | None, str | None, str | None]
 
 
 def _actor_key(user: Actor) -> _ActorKey:
-    return (user.user_scope, user.user_id, user.tenant_id, user.account_id)
+    return (
+        user.user_scope, user.user_id, user.tenant_id, user.account_id, user.business_unit_id
+    )
 
 
 class PermissionResolver:
@@ -148,9 +155,11 @@ class PermissionResolver:
                     ),
                 )
                 .join(Role, Role.id == UserRole.role_id)
+                .join(BusinessUnit, BusinessUnit.id == UserRole.business_unit_id)
                 .where(
                     UserRole.user_id == user.user_id,
                     UserRole.tenant_id == user.tenant_id,
+                    _held_in_session_unit(user),
                     UserRole.account_id.is_(None),
                     UserRole.is_active == True,  # noqa: E712
                     UserRole.is_deleted == False,  # noqa: E712
@@ -185,3 +194,11 @@ class PermissionResolver:
                 )
             )
         return None
+
+
+def _held_in_session_unit(user: Actor) -> ColumnElement[bool]:
+    """A staff role counts when held at the root (every store) or at the session's unit."""
+    at_root = BusinessUnit.bu_type == BU_TYPE_ROOT
+    if user.business_unit_id is None:
+        return at_root
+    return or_(at_root, UserRole.business_unit_id == user.business_unit_id)

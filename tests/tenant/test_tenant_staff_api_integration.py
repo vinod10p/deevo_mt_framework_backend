@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
-from mtf.auth.models.user import User
 from main import app
-from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
+from tests.cleanup import soft_delete_users
+from tests.staff_login import staff_headers
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
+from tests.tenant.rbac_fixtures import THIN_ADMIN_PERMISSIONS
 
 pytestmark = pytest.mark.integration
 
@@ -37,41 +37,6 @@ def _unique_email(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}@example.com"
 
 
-def _cleanup_user(user_id: str) -> None:
-    with SessionLocal() as db:
-        user = db.scalars(select(User).where(User.id == user_id)).first()
-        if user is None:
-            return
-        user.is_active = False
-        user.is_deleted = True
-        user.updated_by = SEEDED_SYSTEM_USER_ID
-        user.deleted_by = SEEDED_SYSTEM_USER_ID
-        db.add(user)
-        db.commit()
-
-
-def _login(
-    client: TestClient,
-    *,
-    email: str,
-    password: str,
-    tenant_id: str,
-) -> dict[str, str]:
-    r = client.post(
-        "/api/auth/login",
-        json={
-            "email": email,
-            "password": password,
-            "tenant_id": tenant_id,
-            "created_from": "web",
-        },
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["user_scope"] == "tenant"
-    assert body["tenant_id"] == tenant_id
-    token = body["access_token"]
-    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +107,7 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         assert lookup.status_code == 200, lookup.text
         assert lookup.json()["tenant_id"] == tenant_id
 
-        headers = _login(
+        headers = staff_headers(
             client,
             email=ctx["owner_email"],
             password=ctx["owner_password"],
@@ -156,12 +121,10 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         assert me_body["tenant_id"] == tenant_id
         assert me_body["role"] == "admin"
         assert me_body["email"] == ctx["owner_email"]
-        assert "screen.lead.view" in me_body["permissions"]
-        assert "api.auth.role.update" in me_body["permissions"]
-        assert any(
-            row["report_key"] == "tenant_account_list" and row["can_export"] is True
-            for row in me_body["reports"]
-        )
+        # The admin template is thin: staff and role admin only, no product screens or
+        # reports until roles grant them.
+        assert set(me_body["permissions"]) == THIN_ADMIN_PERMISSIONS
+        assert me_body["reports"] == []
 
         tenant_me = client.get("/api/tenant/me", headers=headers)
         assert tenant_me.status_code == 200, tenant_me.text
@@ -186,7 +149,7 @@ def test_tenant_crm_subdomain_login_and_me(client: TestClient) -> None:
         )
         client.delete(f"/api/tenant/{tenant_id}")
         for uid in user_ids:
-            _cleanup_user(uid)
+            soft_delete_users(uid)
 
 
 def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
@@ -200,7 +163,7 @@ def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
     try:
         app.dependency_overrides.pop(get_current_user, None)
 
-        owner_headers = _login(
+        owner_headers = staff_headers(
             client,
             email=ctx["owner_email"],
             password=ctx["owner_password"],
@@ -232,7 +195,7 @@ def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
         ids = {row["user_id"] for row in list_staff.json()}
         assert member_user_id in ids
 
-        member_headers = _login(
+        member_headers = staff_headers(
             client,
             email=member_email,
             password="MemberSecret123!",
@@ -242,12 +205,9 @@ def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
         assert member_me.status_code == 200, member_me.text
         member_body = member_me.json()
         assert member_body["role"] == "member"
-        assert "screen.lead.view" in member_body["permissions"]
-        assert "api.auth.role.update" not in member_body["permissions"]
-        assert any(
-            row["report_key"] == "tenant_account_list" and row["can_export"] is False
-            for row in member_body["reports"]
-        )
+        # Members get no template: nothing until a role is assigned.
+        assert member_body["permissions"] == []
+        assert member_body["reports"] == []
 
     finally:
         app.dependency_overrides[get_current_user] = lambda: CurrentUser(
@@ -258,7 +218,7 @@ def test_owner_creates_staff_via_flat_route(client: TestClient) -> None:
         )
         client.delete(f"/api/tenant/{tenant_id}")
         for uid in user_ids:
-            _cleanup_user(uid)
+            soft_delete_users(uid)
 
 
 def test_member_cannot_create_staff_integration(client: TestClient) -> None:
@@ -272,7 +232,7 @@ def test_member_cannot_create_staff_integration(client: TestClient) -> None:
     try:
         app.dependency_overrides.pop(get_current_user, None)
 
-        owner_headers = _login(
+        owner_headers = staff_headers(
             client,
             email=ctx["owner_email"],
             password=ctx["owner_password"],
@@ -290,7 +250,7 @@ def test_member_cannot_create_staff_integration(client: TestClient) -> None:
         assert create_member.status_code == 201, create_member.text
         user_ids.append(create_member.json()["user_id"])
 
-        member_headers = _login(
+        member_headers = staff_headers(
             client,
             email=member_email,
             password="MemberSecret123!",
@@ -317,4 +277,4 @@ def test_member_cannot_create_staff_integration(client: TestClient) -> None:
         )
         client.delete(f"/api/tenant/{tenant_id}")
         for uid in user_ids:
-            _cleanup_user(uid)
+            soft_delete_users(uid)

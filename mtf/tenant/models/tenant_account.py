@@ -1,79 +1,47 @@
-"""SQLAlchemy model — `tenant.tenant_account`."""
+"""SQLAlchemy model — ``tenant.tenant_account``."""
 
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    ForeignKey,
-    String,
-    Unicode,
-    UnicodeText,
-    UniqueConstraint,
-    text,
-)
-from sqlalchemy.dialects.mssql import ROWVERSION
+from sqlalchemy import String, Unicode, UnicodeText, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.schema import FetchedValue
 
 from mtf.shared.database import Base
+from mtf.shared.model_columns import (
+    TENANT_FK,
+    StandardColumnsMixin,
+    business_unit_fk,
+    ulid,
+    ulid_pk,
+)
 
-_DT_UTC = DateTime(timezone=False)
 
+class TenantAccount(StandardColumnsMixin, Base):
+    """An account under a tenant (customer, vendor, employee, …).
 
-class TenantAccount(Base):
-    """Generic account under a tenant (customer, vendor, employee, etc.)."""
+    Accounts are shared by every store, so ``business_unit_id`` is the root unit.
+    """
 
     __tablename__ = "tenant_account"
     __table_args__ = (
         UniqueConstraint("id", "tenant_id", name="UQ_tenant_account_id_tenant_id"),
+        business_unit_fk("tenant_account"),
         {"schema": "tenant"},
     )
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(26), ForeignKey("tenant.tenant.id"), nullable=False)
+    id: Mapped[str] = ulid_pk()
+    tenant_id: Mapped[str] = ulid(TENANT_FK)
+    business_unit_id: Mapped[str] = ulid()
     account_code: Mapped[str] = mapped_column(String(26), nullable=False)
     account_type: Mapped[str] = mapped_column(Unicode(50), nullable=False)
     name: Mapped[str] = mapped_column(Unicode(255), nullable=False)
-
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     website: Mapped[str | None] = mapped_column(String(500), nullable=True)
     custom_fields: Mapped[str | None] = mapped_column(UnicodeText, nullable=True)
-
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
-    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
 
-    row_version: Mapped[bytes] = mapped_column(
-        ROWVERSION,
-        nullable=False,
-        server_default=FetchedValue(),
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        _DT_UTC,
-        nullable=False,
-        server_default=text("sysutcdatetime()"),
-    )
-    created_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    updated_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
-    deleted_by: Mapped[str | None] = mapped_column(
-        String(26),
-        ForeignKey("auth.app_user.id"),
-        nullable=True,
-    )
+    def __repr__(self) -> str:
+        return (
+            f"<TenantAccount id={self.id!r} tenant_id={self.tenant_id!r} "
+            f"account_code={self.account_code!r}>"
+        )

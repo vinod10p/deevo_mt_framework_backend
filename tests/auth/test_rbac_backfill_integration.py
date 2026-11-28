@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 from sqlalchemy import select, text
@@ -16,39 +15,15 @@ from mtf.shared.database import SessionLocal, engine
 from mtf.shared.deps import CurrentUser
 from tests.auth.test_rbac_backfill import BACKFILL_PATH
 from tests.auth.test_rbac_seed_integration import _apply_seed
+from tests.sql_scripts import apply_sql_script
 
 pytestmark = pytest.mark.integration
 
 
-def _batches(sql: str) -> list[str]:
-    batches: list[str] = []
-    current: list[str] = []
-    for line in sql.splitlines():
-        if line.strip().upper() == "GO":
-            batch = "\n".join(current).strip()
-            if batch:
-                batches.append(batch)
-            current = []
-        else:
-            current.append(line)
-    tail = "\n".join(current).strip()
-    if tail:
-        batches.append(tail)
-    return batches
 
 
 def _apply_backfill() -> None:
-    sql = Path(BACKFILL_PATH).read_text(encoding="utf-8")
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        try:
-            for batch in _batches(sql):
-                if batch.lstrip().upper().startswith("USE "):
-                    continue
-                conn.execute(text(batch))
-        finally:
-            # Scripts set NOCOUNT ON; a pooled connection that keeps it makes
-            # SQLAlchemy see rowcount -1 (StaleDataError) in later tests.
-            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
+    apply_sql_script(BACKFILL_PATH)
 
 
 def _live_count(sql: str) -> int:

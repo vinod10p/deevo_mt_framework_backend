@@ -18,9 +18,11 @@ from sqlalchemy.exc import DBAPIError
 from main import app
 from mtf.auth.models.tenant_user import TenantUser
 from mtf.rpt.models import ReportDefinition, ReportSavedView
+from mtf.shared.clock import utc_now
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
 from mtf.shared.security import generate_id
+from tests.tenant.rbac_fixtures import report_access
 
 pytestmark = pytest.mark.integration
 
@@ -52,16 +54,17 @@ def setup() -> Generator[dict[str, object], None, None]:
         pytest.skip(f"database not available: {exc.__class__.__name__}")
 
     by_tenant: dict[str, dict[str, list[str]]] = {}
+    root_units = {m.tenant_id: m.business_unit_id for m in members}
     for m in members:
         by_tenant.setdefault(m.tenant_id, {}).setdefault(m.role, []).append(m.user_id)
     candidates = [
         (tenant, roles) for tenant, roles in by_tenant.items()
-        if (roles.get("owner") or roles.get("admin")) and roles.get("member")
+        if roles.get("admin") and roles.get("member")
     ]
     if report is None or not candidates:
-        pytest.skip("need tenant_account_list and a tenant with an owner/admin and a member")
+        pytest.skip("need tenant_account_list and a tenant with an admin and a member")
     tenant_id, roles = candidates[0]
-    owner_id = (roles.get("owner") or roles["admin"])[0]
+    owner_id = roles["admin"][0]
     member_id = roles["member"][0]
 
     tag = generate_id()[-8:]
@@ -73,6 +76,7 @@ def setup() -> Generator[dict[str, object], None, None]:
         ("member", tenant_id, member_id, f"pytest member {tag}"),
         ("deleted", tenant_id, owner_id, f"pytest deleted {tag}"),
     ]
+    soft_deleted = {"is_deleted": True, "deleted_at": utc_now(), "deleted_by": owner_id}
     with SessionLocal() as db:
         for key, row_tenant, user_id, name in rows:
             scope = "system" if key == "system" else ("tenant" if key == "tenant" else "user")
@@ -80,19 +84,21 @@ def setup() -> Generator[dict[str, object], None, None]:
                 ReportSavedView(
                     id=ids[key],
                     tenant_id=row_tenant,
+                    business_unit_id=root_units[row_tenant] if row_tenant else None,
                     report_id=report.id,
                     scope_type=scope,
                     user_id=user_id,
                     view_name=name,
                     criteria_json=json.dumps({"version": 1, "status": "active"}),
                     layout_json=json.dumps(EMPTY_LAYOUT),
-                    is_deleted=key == "deleted",
+                    **(soft_deleted if key == "deleted" else {}),
                 )
             )
         db.commit()
     try:
-        yield {"tenant_id": tenant_id, "owner_id": owner_id, "member_id": member_id,
-               "ids": ids}
+        with report_access(tenant_id, REPORT_KEY, owner_id, member_id):
+            yield {"tenant_id": tenant_id, "owner_id": owner_id, "member_id": member_id,
+                   "ids": ids}
     finally:
         with SessionLocal() as db:
             db.execute(delete(ReportSavedView).where(ReportSavedView.id.in_(ids.values())))

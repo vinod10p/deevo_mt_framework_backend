@@ -89,6 +89,7 @@ def _grant(db: Session, membership: TenantUser, *, role_active: bool = True) -> 
     role = Role(
         id=generate_id(),
         tenant_id=membership.tenant_id,
+        business_unit_id=membership.business_unit_id,
         code=f"pytest_{token}",
         name=f"pytest {token}",
         user_scope="tenant",
@@ -110,6 +111,7 @@ def _grant(db: Session, membership: TenantUser, *, role_active: bool = True) -> 
         UserRole(
             id=generate_id(),
             tenant_id=membership.tenant_id,
+            business_unit_id=membership.business_unit_id,
             user_id=membership.user_id,
             account_id=None,
             role_id=role.id,

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,17 +14,14 @@ from mtf.audit.service import (
     row_snapshot,
 )
 from mtf.auth.services.membership_rbac import copy_default_role_reports
+from mtf.shared.clock import utc_now
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import create_default_units
 from mtf.tenant.models import Tenant
 from mtf.tenant.schemas import TenantCreate, TenantUpdate
 from mtf.tenant.services.rbac_screens import enable_screen_rbac
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TenantService:
@@ -80,15 +75,12 @@ class TenantService:
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
     ) -> Tenant:
-        tenant = Tenant(
-            id=generate_id(),
-            created_by=created_by,
-            updated_by=created_by,
-            **data.model_dump(exclude_none=True),
-        )
+        """Create a tenant with its root unit, first store, default report grants and flags."""
+        tenant = Tenant.new(by=created_by, **data.model_dump(exclude_none=True))
         self._db.add(tenant)
         try:
             self._db.flush()
+            create_default_units(self._db, tenant, created_by=created_by)
             audit_insert(
                 self._db,
                 entity=tenant,
@@ -141,7 +133,7 @@ class TenantService:
         for key, value in updates.items():
             setattr(tenant, key, value)
 
-        tenant.updated_at = _utc_naive_now()
+        tenant.updated_at = utc_now()
         if updated_by is not None:
             tenant.updated_by = updated_by
 
@@ -173,7 +165,7 @@ class TenantService:
         self,
         tenant_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -184,13 +176,7 @@ class TenantService:
             row_version_conflict("TENANT_TENANT")
 
         before = row_snapshot(tenant)
-        tenant.is_deleted = True
-        tenant.deleted_by = deleted_by
-        tenant.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            tenant.updated_by = deleted_by
-
-        self._db.add(tenant)
+        tenant.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=tenant,

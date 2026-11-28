@@ -7,7 +7,6 @@ from sqlalchemy.orm import configure_mappers
 
 from mtf.tenant.models.tenant_account import TenantAccount
 from mtf.tenant.models.tenant_account_address import TenantAccountAddress
-
 from tests.tenant.conftest import minimal_tenant_account, minimal_tenant_account_address
 
 
@@ -30,6 +29,7 @@ def test_tenant_account_columns() -> None:
     assert names == {
         "id",
         "tenant_id",
+        "business_unit_id",
         "account_code",
         "account_type",
         "name",
@@ -45,6 +45,7 @@ def test_tenant_account_columns() -> None:
         "updated_at",
         "created_by",
         "updated_by",
+        "deleted_at",
         "deleted_by",
     }
 
@@ -82,13 +83,20 @@ def test_tenant_account_address_columns() -> None:
 
 
 def test_tenant_account_address_foreign_keys() -> None:
-    for fk in TenantAccountAddress.__table__.foreign_keys:
-        if fk.parent.key == "account_id":
-            assert fk.column.table.fullname == "tenant.tenant_account"
-        elif fk.parent.key == "tenant_id":
-            assert fk.column.table.fullname == "tenant.tenant"
-        else:
-            assert fk.column.table.fullname == "auth.app_user"
+    targets = {
+        (fk.parent.key, fk.column.table.fullname)
+        for fk in TenantAccountAddress.__table__.foreign_keys
+    }
+    assert targets == {
+        ("tenant_id", "tenant.tenant"),
+        ("account_id", "tenant.tenant_account"),
+        # Composite (business_unit_id, tenant_id) -> tenant.business_unit (id, tenant_id).
+        ("business_unit_id", "tenant.business_unit"),
+        ("tenant_id", "tenant.business_unit"),
+        ("created_by", "auth.app_user"),
+        ("updated_by", "auth.app_user"),
+        ("deleted_by", "auth.app_user"),
+    }
 
 
 def test_tenant_account_address_repr() -> None:

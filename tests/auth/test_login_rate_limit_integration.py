@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from mtf.shared.config import get_settings
+from mtf.tenant.business_units import FIRST_STORE_CODE
 from tests.auth.conftest import PASSWORD
 from tests.auth.test_session_revocation_integration import _me
 
@@ -24,6 +25,7 @@ def test_attacker_cannot_lock_out_real_user(staff: dict) -> None:
         "password": "definitely-wrong",
         "created_from": "web",
         "tenant_id": staff["tenant_id"],
+        "business_unit_code": FIRST_STORE_CODE,
     }
     limit = get_settings().login_max_failures_per_account_ip
 

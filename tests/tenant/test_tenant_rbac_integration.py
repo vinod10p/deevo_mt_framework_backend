@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Generator
-from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -14,11 +13,11 @@ from sqlalchemy import select
 
 from main import app
 from mtf.auth.models.permission import Permission
-from mtf.auth.models.role import Role
-from mtf.auth.models.user import User
 from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
+from tests.cleanup import soft_delete_tenant_roles, soft_delete_users
+from tests.staff_login import staff_headers
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
 
 pytestmark = pytest.mark.integration
@@ -35,17 +34,6 @@ def _unique(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
 
-def _cleanup_user(user_id: str) -> None:
-    with SessionLocal() as db:
-        user = db.scalars(select(User).where(User.id == user_id)).first()
-        if user is None:
-            return
-        user.is_active = False
-        user.is_deleted = True
-        user.updated_by = SEEDED_SYSTEM_USER_ID
-        user.deleted_by = SEEDED_SYSTEM_USER_ID
-        db.add(user)
-        db.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -88,27 +76,13 @@ def _create_tenant_with_owner(client: TestClient) -> dict[str, Any]:
     }
 
 
-def _login(client: TestClient, *, email: str, password: str, tenant_id: str) -> dict[str, str]:
-    r = client.post(
-        "/api/auth/login",
-        json={
-            "email": email,
-            "password": password,
-            "tenant_id": tenant_id,
-            "created_from": "web",
-        },
-    )
-    assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
-
-
 def test_member_cannot_manage_roles(client: TestClient) -> None:
     ctx = _create_tenant_with_owner(client)
     tenant_id = ctx["tenant_id"]
     user_ids = [ctx["owner_user_id"]]
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        owner_headers = _login(
+        owner_headers = staff_headers(
             client,
             email=ctx["owner_email"],
             password="OwnerSecret123!",
@@ -128,7 +102,7 @@ def test_member_cannot_manage_roles(client: TestClient) -> None:
         )
         assert created.status_code == 201, created.text
         user_ids.append(created.json()["user_id"])
-        member_headers = _login(
+        member_headers = staff_headers(
             client,
             email=member_email,
             password="MemberSecret123!",
@@ -152,7 +126,7 @@ def test_member_cannot_manage_roles(client: TestClient) -> None:
         )
         client.delete(f"/api/tenant/{tenant_id}")
         for uid in user_ids:
-            _cleanup_user(uid)
+            soft_delete_users(uid)
 
 
 def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) -> None:
@@ -165,7 +139,7 @@ def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) ->
 
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        headers = _login(
+        headers = staff_headers(
             client,
             email=ctx["owner_email"],
             password="OwnerSecret123!",
@@ -325,20 +299,5 @@ def test_tenant_assignment_crud_last_admin_and_escalation(client: TestClient) ->
             client.delete(f"/api/auth/permissions/{extra_permission_id}")
         client.delete(f"/api/tenant/{tenant_id}")
         for uid in user_ids:
-            _cleanup_user(uid)
-        with SessionLocal() as db:
-            leftover = db.scalars(
-                select(Role).where(
-                    Role.tenant_id == tenant_id,
-                    Role.is_deleted == False,  # noqa: E712
-                )
-            ).all()
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            for row in leftover:
-                row.is_deleted = True
-                row.deleted_at = now
-                row.deleted_by = SEEDED_SYSTEM_USER_ID
-                row.updated_by = SEEDED_SYSTEM_USER_ID
-                db.add(row)
-            if leftover:
-                db.commit()
+            soft_delete_users(uid)
+        soft_delete_tenant_roles(tenant_id)

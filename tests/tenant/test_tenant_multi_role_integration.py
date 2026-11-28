@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Generator
-from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -14,9 +13,10 @@ from sqlalchemy import select
 
 from main import app
 from mtf.auth.models.role import Role
-from mtf.auth.models.user import User
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
+from tests.cleanup import soft_delete_tenant_roles, soft_delete_users
+from tests.staff_login import staff_headers
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
 from tests.tenant.rbac_fixtures import assign_role, create_member, custom_role
 
@@ -45,20 +45,6 @@ def _unique(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
 
-def _login(client: TestClient, *, email: str, password: str, tenant_id: str) -> dict[str, str]:
-    r = client.post(
-        "/api/auth/login",
-        json={
-            "email": email,
-            "password": password,
-            "tenant_id": tenant_id,
-            "created_from": "web",
-        },
-    )
-    assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
-
-
 def _me_permissions(client: TestClient, headers: dict[str, str]) -> set[str]:
     r = client.get("/api/auth/me", headers=headers)
     assert r.status_code == 200, r.text
@@ -79,23 +65,8 @@ def _role_codes(client: TestClient, headers: dict[str, str], user_id: str) -> di
 def _cleanup(client: TestClient, tenant_id: str, user_ids: list[str]) -> None:
     app.dependency_overrides[get_current_user] = _system_user
     client.delete(f"/api/tenant/{tenant_id}")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    with SessionLocal() as db:
-        for user in db.scalars(select(User).where(User.id.in_(user_ids))).all():
-            user.is_active = False
-            user.is_deleted = True
-            user.updated_by = SEEDED_SYSTEM_USER_ID
-            user.deleted_by = SEEDED_SYSTEM_USER_ID
-            db.add(user)
-        for role in db.scalars(
-            select(Role).where(Role.tenant_id == tenant_id, Role.is_deleted == False)  # noqa: E712
-        ).all():
-            role.is_deleted = True
-            role.deleted_at = now
-            role.deleted_by = SEEDED_SYSTEM_USER_ID
-            role.updated_by = SEEDED_SYSTEM_USER_ID
-            db.add(role)
-        db.commit()
+    soft_delete_users(*user_ids)
+    soft_delete_tenant_roles(tenant_id)
 
 
 def _setup(client: TestClient) -> dict[str, Any]:
@@ -130,12 +101,12 @@ def test_user_holds_multiple_roles_with_union_of_grants(client: TestClient) -> N
     user_ids = [ctx["owner_user_id"]]
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        admin = _login(
+        admin = staff_headers(
             client, email=ctx["owner_email"], password="OwnerSecret123!", tenant_id=tenant_id
         )
         member_id, member_email = create_member(client, admin)
         user_ids.append(member_id)
-        member = _login(
+        member = staff_headers(
             client, email=member_email, password="MemberSecret123!", tenant_id=tenant_id
         )
         assert _role_codes(client, admin, member_id) == {}

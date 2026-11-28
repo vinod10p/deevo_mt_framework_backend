@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -14,15 +12,12 @@ from mtf.audit.service import (
     audit_update,
     row_snapshot,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, not_found, row_version_conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 from mtf.tenant.models import Tenant, TenantAccount
 from mtf.tenant.schemas.tenant_account import TenantAccountCreate, TenantAccountUpdate
-
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _like_pattern(raw: str) -> tuple[str, str]:
@@ -147,11 +142,10 @@ class TenantAccountService:
         payload = data.model_dump(exclude_none=True)
         payload["account_code"] = code
 
-        row = TenantAccount(
-            id=generate_id(),
+        row = TenantAccount.new(
+            by=created_by,
             tenant_id=tenant_id,
-            created_by=created_by,
-            updated_by=created_by,
+            business_unit_id=root_unit_id(self._db, tenant_id),
             **payload,
         )
         self._db.add(row)
@@ -196,7 +190,7 @@ class TenantAccountService:
         for key, value in updates.items():
             setattr(row, key, value)
 
-        row.updated_at = _utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 
@@ -221,7 +215,7 @@ class TenantAccountService:
         account_id: str,
         tenant_id: str,
         *,
-        deleted_by: str | None = None,
+        deleted_by: str,
         row_version: bytes | None = None,
         actor: CurrentUser | None = None,
         source: AuditSource | None = None,
@@ -232,13 +226,7 @@ class TenantAccountService:
             row_version_conflict("TENANT_ACCOUNT")
 
         before = row_snapshot(row)
-        row.is_deleted = True
-        row.deleted_by = deleted_by
-        row.updated_at = _utc_naive_now()
-        if deleted_by is not None:
-            row.updated_by = deleted_by
-
-        self._db.add(row)
+        row.mark_deleted(deleted_by)
         audit_soft_delete(
             self._db,
             entity=row,

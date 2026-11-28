@@ -45,11 +45,13 @@ class RoleRead(BaseModel):
 
     id: str
     tenant_id: str | None
+    business_unit_id: str | None
     code: str
     name: str
     description: str | None
     user_scope: str
     is_system: bool
+    is_tenant_wide: bool
     is_active: bool
     is_deleted: bool
     row_version: bytes

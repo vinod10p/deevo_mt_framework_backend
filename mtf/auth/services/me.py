@@ -1,13 +1,33 @@
-"""Assemble RBAC fields for ``GET /api/auth/me`` (UI only)."""
+"""Assemble RBAC and business unit fields for ``GET /api/auth/me`` (UI only)."""
 
 from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mtf.auth.schemas.user import MeReportGrantRead
+from mtf.auth.schemas.user import MeBusinessUnitRead, MeReportGrantRead
 from mtf.auth.services.permission_resolver import Actor, PermissionResolver
 from mtf.rpt.models.report_definition import ReportDefinition
+from mtf.tenant.models.business_unit import BusinessUnit
+from mtf.tenant.services.business_unit_service import BusinessUnitService
+
+
+def me_business_unit_fields(db: Session, user: Actor) -> dict[str, object]:
+    """``business_unit``, ``multi_store`` and (staff only) ``business_units``."""
+    if user.tenant_id is None or user.business_unit_id is None:
+        return {}
+    units = BusinessUnitService(db)
+    current = db.get_one(BusinessUnit, user.business_unit_id)
+    open_units = (
+        units.list_open_to_staff(user.tenant_id, user.user_id)
+        if user.user_scope == "tenant"
+        else []
+    )
+    return {
+        "business_unit": MeBusinessUnitRead.model_validate(current),
+        "multi_store": units.is_multi_store(user.tenant_id),
+        "business_units": [MeBusinessUnitRead.model_validate(unit) for unit in open_units],
+    }
 
 
 def me_rbac_fields(

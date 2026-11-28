@@ -19,7 +19,7 @@ from mtf.tenant.api.tenant_rbac import (
     get_user_role_service,
     require_role_admin,
 )
-from tests.tenant.conftest import TEST_TENANT_ID, TEST_USER_ID
+from tests.tenant.conftest import TEST_ROOT_BU_ID, TEST_TENANT_ID, TEST_USER_ID
 
 _NOW = datetime(2026, 5, 9, 12, 0, 0)
 _ROW_VER = bytes(range(8))
@@ -36,11 +36,13 @@ def _role() -> Role:
     return Role(
         id=_ROLE_ID,
         tenant_id=TEST_TENANT_ID,
+        business_unit_id=TEST_ROOT_BU_ID,
         code="support_lead",
         name="Support Lead",
         description=None,
         user_scope="tenant",
         is_system=False,
+        is_tenant_wide=False,
         is_active=True,
         is_deleted=False,
         row_version=_ROW_VER,
@@ -176,6 +178,7 @@ def test_assign_user_role_calls_service() -> None:
     svc.create.return_value = UserRole(
         id="01JRACUSRROLE0000000000009",
         tenant_id=TEST_TENANT_ID,
+        business_unit_id=TEST_ROOT_BU_ID,
         user_id=TEST_USER_ID,
         account_id=None,
         role_id=_ROLE_ID,

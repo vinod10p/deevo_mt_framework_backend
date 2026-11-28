@@ -36,6 +36,7 @@ _STANDARD = {
 @pytest.fixture(scope="module", autouse=True)
 def _configure_mappers_for_fk_resolution() -> None:
     from mtf.rpt.models.report_definition import ReportDefinition  # noqa: F401
+    from mtf.tenant.models.business_unit import BusinessUnit  # noqa: F401
     from mtf.tenant.models.tenant import Tenant  # noqa: F401
     from mtf.tenant.models.tenant_account import TenantAccount  # noqa: F401
 
@@ -97,14 +98,21 @@ def test_role_mapping() -> None:
     assert Role.__tablename__ == "role"
     assert _column_names(Role) == _STANDARD | {
         "tenant_id",
+        "business_unit_id",
         "code",
         "name",
         "description",
         "user_scope",
         "is_system",
+        "is_tenant_wide",
     }
     assert "UQ_role_id_user_scope" in _unique_constraint_names(Role)
-    assert (("tenant_id",), (("tenant.tenant", "id"),)) in _fk_column_pairs(Role)
+    fks = _fk_column_pairs(Role)
+    assert (("tenant_id",), (("tenant.tenant", "id"),)) in fks
+    assert (
+        ("business_unit_id", "tenant_id"),
+        (("tenant.business_unit", "id"), ("tenant.business_unit", "tenant_id")),
+    ) in fks
 
 
 def test_app_user_exposes_scope_unique_for_user_role_fk() -> None:
@@ -139,6 +147,7 @@ def test_user_role_composite_foreign_keys_and_scope_shape() -> None:
     assert UserRole.__tablename__ == "user_role"
     assert _column_names(UserRole) == _STANDARD | {
         "tenant_id",
+        "business_unit_id",
         "user_id",
         "account_id",
         "role_id",
@@ -157,6 +166,10 @@ def test_user_role_composite_foreign_keys_and_scope_shape() -> None:
         ("account_id", "tenant_id"),
         (("tenant.tenant_account", "id"), ("tenant.tenant_account", "tenant_id")),
     ) in fks
+    assert (
+        ("business_unit_id", "tenant_id"),
+        (("tenant.business_unit", "id"), ("tenant.business_unit", "tenant_id")),
+    ) in fks
     names = {constraint.name for constraint in UserRole.__table__.constraints}
     assert "CK_user_role_scope_shape" in names
     assert "FK_user_role_account_tenant" in names
@@ -167,6 +180,7 @@ def test_role_report_mapping() -> None:
     assert RoleReport.__tablename__ == "role_report"
     assert _column_names(RoleReport) == _STANDARD | {
         "tenant_id",
+        "business_unit_id",
         "role_id",
         "report_id",
         "can_view",
@@ -176,6 +190,10 @@ def test_role_report_mapping() -> None:
     assert (("tenant_id",), (("tenant.tenant", "id"),)) in fks
     assert (("role_id",), (("auth.role", "id"),)) in fks
     assert (("report_id",), (("rpt.report_definition", "id"),)) in fks
+    assert (
+        ("business_unit_id", "tenant_id"),
+        (("tenant.business_unit", "id"), ("tenant.business_unit", "tenant_id")),
+    ) in fks
 
 
 def test_default_role_report_mapping() -> None:

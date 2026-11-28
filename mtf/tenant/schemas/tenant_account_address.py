@@ -41,6 +41,7 @@ class TenantAccountAddressRead(BaseModel):
 
     id: str
     tenant_id: str
+    business_unit_id: str
     account_id: str
     address_type: str
     is_default: bool

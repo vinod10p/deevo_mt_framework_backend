@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 
 from mtf.tenant.schemas import TenantCreate, TenantUpdate
 from mtf.tenant.services.tenant_service import TenantService
-
 from tests.tenant.conftest import TEST_TENANT_ID, minimal_tenant
 
 

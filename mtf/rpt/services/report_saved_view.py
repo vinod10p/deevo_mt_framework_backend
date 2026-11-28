@@ -6,7 +6,6 @@ import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, case, or_, select
@@ -22,10 +21,11 @@ from mtf.rpt.services.criteria_validation import criteria_to_json, validate_repo
 from mtf.rpt.services.layout_validation import LAYOUT_SECTIONS, validate_report_layout
 from mtf.rpt.services.report_catalog import ReportCatalogService, ResolvedReport
 from mtf.rpt.services.view_authorization import MANAGE_ACTION_BY_SCOPE, ReportViewAuthorizer
+from mtf.shared.clock import utc_now
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, forbidden, not_found, row_version_conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 
 #: Default precedence and list order: the caller's own views first, system views last.
 _TIER_ORDER = {"user": 0, "tenant": 1, "system": 2}
@@ -46,9 +46,6 @@ def _stored_object(raw: str) -> dict[str, Any]:
     value.pop("version", None)
     return value
 
-
-def _utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _snapshot(view: ReportSavedView) -> dict[str, Any]:
@@ -115,9 +112,11 @@ class ReportSavedViewService:
         criteria_json = self._criteria_json(data.criteria, resolved)
         layout_json = self._layout_json(data.layout, resolved)
 
-        view = ReportSavedView(
-            id=generate_id(),
-            tenant_id=None if data.scope_type == "system" else tenant_id,
+        view_tenant_id = None if data.scope_type == "system" else tenant_id
+        view = ReportSavedView.new(
+            by=user.user_id,
+            tenant_id=view_tenant_id,
+            business_unit_id=root_unit_id(self._db, view_tenant_id) if view_tenant_id else None,
             report_id=report.id,
             scope_type=data.scope_type,
             user_id=user.user_id if data.scope_type == "user" else None,
@@ -125,10 +124,6 @@ class ReportSavedViewService:
             criteria_json=criteria_json,
             layout_json=layout_json,
             is_default=data.is_default,
-            is_active=True,
-            is_deleted=False,
-            created_by=user.user_id,
-            updated_by=user.user_id,
         )
         with self._write_errors():
             if data.is_default:
@@ -172,7 +167,7 @@ class ReportSavedViewService:
                 self._clear_tier_default(user, view, source)
             for key, value in changes.items():
                 setattr(view, key, value)
-            view.updated_at = _utc_naive_now()
+            view.updated_at = utc_now()
             view.updated_by = user.user_id
             self._audit(
                 user, source, "update", view.id,
@@ -196,11 +191,8 @@ class ReportSavedViewService:
 
         old_values = _snapshot(view)
         with self._write_errors():
-            view.is_deleted = True
-            view.is_default = False
-            view.deleted_by = user.user_id
-            view.updated_by = user.user_id
-            view.updated_at = _utc_naive_now()
+            view.is_default = False  # CK_report_saved_view_default_state
+            view.mark_deleted(user.user_id)
             self._audit(
                 user,
                 source,
@@ -294,7 +286,7 @@ class ReportSavedViewService:
         if view.scope_type == "user":
             stmt = stmt.where(ReportSavedView.user_id == view.user_id)
 
-        now = _utc_naive_now()
+        now = utc_now()
         for previous in self._db.scalars(stmt).all():
             previous.is_default = False
             previous.updated_at = now

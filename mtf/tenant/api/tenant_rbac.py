@@ -339,6 +339,7 @@ def assign_tenant_user_role(
 def revoke_tenant_user_role(
     user_id: str,
     role_id: str,
+    business_unit_id: str | None = None,
     tenant_id: str = Depends(get_tenant_id),
     current_user: CurrentUser = Depends(require_role_admin),
     source: AuditSource = Depends(get_audit_source),
@@ -348,6 +349,7 @@ def revoke_tenant_user_role(
         tenant_id,
         user_id,
         role_id,
+        business_unit_id=business_unit_id,
         deleted_by=current_user.user_id,
         actor=current_user,
         source=source,

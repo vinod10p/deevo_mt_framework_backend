@@ -22,12 +22,13 @@ from mtf.auth.schemas.session import (
     BrowserLogoutRequest,
     BrowserRefreshRequest,
     BrowserTokenResponse,
+    BusinessUnitSwitchRequest,
     LoginRequest,
     RefreshRequest,
     TokenResponse,
 )
 from mtf.auth.services import TenantAccountUserService, TenantUserService, UserService
-from mtf.auth.services.me import me_rbac_fields
+from mtf.auth.services.me import me_business_unit_fields, me_rbac_fields
 from mtf.auth.services.permission_resolver import PermissionResolver
 from mtf.auth.services.session_service import SessionService
 from mtf.shared.config import get_settings
@@ -36,12 +37,12 @@ from mtf.shared.deps import (
     get_current_user,
     get_db,
     get_permission_resolver,
+    require_tenant_scope,
 )
 from mtf.shared.exceptions import forbidden, unauthorized
 from mtf.shared.security import decode_access_token, decode_refresh_token
 
 router = APIRouter(tags=["auth"])
-
 
 
 def get_session_service(db: Session = Depends(get_db)) -> SessionService:
@@ -119,7 +120,9 @@ def _require_browser_origin(request: Request) -> None:
         forbidden("AUTH", "Untrusted browser origin")
 
 
-def _browser_tokens(request: Request, response: Response, tokens: TokenResponse) -> BrowserTokenResponse:
+def _browser_tokens(
+    request: Request, response: Response, tokens: TokenResponse
+) -> BrowserTokenResponse:
     if tokens.user_scope not in {"tenant", "tenant_account"}:
         forbidden("AUTH", "This account cannot sign in to the tenant application")
     response.headers["Cache-Control"] = "no-store"
@@ -298,7 +301,51 @@ def get_me(
         account_type=account_type,
         permissions=permissions,
         reports=reports,
+        **me_business_unit_fields(db, current_user),
     )
+
+
+def _switch_business_unit(
+    request: Request,
+    payload: BusinessUnitSwitchRequest,
+    user: CurrentUser,
+    source: AuditSource,
+    service: SessionService,
+) -> TokenResponse:
+    raw_token = _raw_access_token_from_request(request)
+    return service.switch_business_unit(
+        raw_token, user, payload.business_unit_code, source=source
+    )
+
+
+@router.post("/session/business-unit", response_model=TokenResponse)
+def switch_business_unit(
+    request: Request,
+    payload: BusinessUnitSwitchRequest,
+    user: CurrentUser = Depends(require_tenant_scope),
+    source: AuditSource = Depends(get_audit_source),
+    service: SessionService = Depends(get_session_service),
+) -> TokenResponse:
+    """Move this session to another store; returns a new token pair (staff only)."""
+    return _switch_business_unit(request, payload, user, source, service)
+
+
+@router.post(
+    "/browser/session/business-unit",
+    response_model=BrowserTokenResponse,
+    dependencies=[Depends(_require_browser_origin)],
+)
+def browser_switch_business_unit(
+    request: Request,
+    response: Response,
+    payload: BusinessUnitSwitchRequest,
+    user: CurrentUser = Depends(require_tenant_scope),
+    source: AuditSource = Depends(get_audit_source),
+    service: SessionService = Depends(get_session_service),
+) -> BrowserTokenResponse:
+    """Browser variant: the new refresh token goes into the cookie, not the body."""
+    tokens = _switch_business_unit(request, payload, user, source, service)
+    return _browser_tokens(request, response, tokens)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -16,9 +16,9 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
 from mtf.audit.models import AuditLog
-from mtf.auth.models.user import User
 from mtf.shared.database import SessionLocal, engine
-from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
+from tests.cleanup import soft_delete_users
+from tests.staff_login import staff_headers
 
 pytestmark = pytest.mark.integration
 
@@ -104,17 +104,6 @@ def _find_login_failed(email: str) -> AuditLog | None:
         ).first()
 
 
-def _cleanup_user(user_id: str) -> None:
-    with SessionLocal() as db:
-        user = db.scalars(select(User).where(User.id == user_id)).first()
-        if user is None:
-            return
-        user.is_active = False
-        user.is_deleted = True
-        user.updated_by = SEEDED_SYSTEM_USER_ID
-        user.deleted_by = SEEDED_SYSTEM_USER_ID
-        db.add(user)
-        db.commit()
 
 
 def test_tenant_mutations_round_trip_audit_log(
@@ -325,7 +314,7 @@ def test_tenant_jwt_cannot_read_unscoped_log(
                     f"/api/tenant/{tenant_id}/users/{user_id}",
                     headers=system_headers,
                 )
-            _cleanup_user(user_id)
+            soft_delete_users(user_id)
         if tenant_id is not None:
             client.delete(f"/api/tenant/{tenant_id}", headers=system_headers)
 
@@ -373,20 +362,6 @@ def test_app_role_cannot_update_or_delete_audit_log(
         assert db.scalars(select(AuditLog).where(AuditLog.id == log_id)).first() is not None
 
 
-def _login_staff(client: TestClient, email: str, password: str, tenant_id: str) -> dict[str, str]:
-    login = client.post(
-        "/api/auth/login",
-        json={
-            "email": email,
-            "password": password,
-            "created_from": "web",
-            "tenant_id": tenant_id,
-        },
-    )
-    assert login.status_code == 200, login.text
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-
 def test_tenant_member_cannot_read_audit_logs(
     client: TestClient, system_headers: dict[str, str]
 ) -> None:
@@ -414,8 +389,8 @@ def test_tenant_member_cannot_read_audit_logs(
             user_ids.append(staff.json()["user_id"])
             accounts[role] = email
 
-        admin_headers = _login_staff(client, accounts["admin"], password, tenant_id)
-        member_headers = _login_staff(client, accounts["member"], password, tenant_id)
+        admin_headers = staff_headers(client, accounts["admin"], tenant_id, password=password)
+        member_headers = staff_headers(client, accounts["member"], tenant_id, password=password)
 
         own = _list_logs(client, admin_headers, limit=5)
         assert own and all(row["tenant_id"] == tenant_id for row in own)
@@ -429,5 +404,5 @@ def test_tenant_member_cannot_read_audit_logs(
     finally:
         for user_id in user_ids:
             client.delete(f"/api/tenant/{tenant_id}/users/{user_id}", headers=system_headers)
-            _cleanup_user(user_id)
+            soft_delete_users(user_id)
         client.delete(f"/api/tenant/{tenant_id}", headers=system_headers)

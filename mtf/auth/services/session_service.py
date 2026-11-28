@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Never
 
 from fastapi import HTTPException
@@ -17,7 +17,9 @@ from mtf.auth.models.tenant_user import TenantUser
 from mtf.auth.models.user import User
 from mtf.auth.schemas.session import LoginRequest, RefreshRequest, TokenResponse
 from mtf.auth.services.login_throttle import LoginThrottle, ThrottleLimits, login_throttle
+from mtf.shared.clock import utc_now
 from mtf.shared.config import get_settings
+from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import unauthorized
 from mtf.shared.security import (
     create_access_token,
@@ -27,7 +29,8 @@ from mtf.shared.security import (
     hash_token,
     verify_password,
 )
-from mtf.tenant.models import Tenant, TenantAccount
+from mtf.tenant.models import BusinessUnit, Tenant, TenantAccount
+from mtf.tenant.services.business_unit_service import BusinessUnitService, StoreAccessError
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +44,13 @@ _RATE_LIMITED = "Too many login attempts. Please try again later."
 _GUESS_REASONS = frozenset({None, "locked"})
 
 
-def _utc_naive_now() -> datetime:
-    """UTC instant as naive ``datetime`` for ``DATETIME2`` columns."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 class SessionService:
     """Login, refresh (rotate in place), logout, and logout-all for ``auth.session``."""
 
     def __init__(self, db: Session, *, throttle: LoginThrottle | None = None) -> None:
         self._db = db
         self._throttle = throttle or login_throttle
+        self._units = BusinessUnitService(db)
 
     def login(
         self,
@@ -59,7 +58,7 @@ class SessionService:
         *,
         source: AuditSource | None = None,
     ) -> TokenResponse:
-        now = _utc_naive_now()
+        now = utc_now()
         email_norm = request.email.strip().lower()
         source = source or AuditSource()
         settings = get_settings()
@@ -119,6 +118,7 @@ class SessionService:
         self._db.add(user)
 
         tenant_id: str | None = None
+        unit: BusinessUnit | None = None
         account_id: str | None = None
         account_name: str | None = None
 
@@ -138,6 +138,16 @@ class SessionService:
                     reason="no_membership",
                 )
             tenant_id = request.tenant_id
+            # Checked after the password, so a wrong store is not a credential guess.
+            try:
+                unit = self._units.resolve_login_unit(
+                    tenant_id, user.id, request.business_unit_code
+                )
+            except StoreAccessError as error:
+                self._reject_login(
+                    source, email_norm, user=user, tenant_id=tenant_id,
+                    reason=error.reason, message=str(error),
+                )
         elif user.user_scope == "tenant_account":
             if request.tenant_id is None:
                 self._reject_login(
@@ -147,10 +157,13 @@ class SessionService:
             self._require_active_tenant(request.tenant_id)
             account_id = self._require_single_account_membership(user.id, request.tenant_id)
             tenant_id = request.tenant_id
+            unit = self._units.get_root(tenant_id)
             account_name = self._account_name(account_id)
         else:
             self._reject_login(source, email_norm, user=user, reason="invalid_scope")
 
+        business_unit_id = unit.id if unit is not None else None
+        unit_fields = self._unit_fields(unit)
         session_id = generate_id()
         access_token = create_access_token(
             user.id,
@@ -159,6 +172,7 @@ class SessionService:
             tenant_id,
             account_id,
             session_id=session_id,
+            business_unit_id=business_unit_id,
         )
         refresh_token = create_refresh_token(user.id, session_id)
 
@@ -170,6 +184,7 @@ class SessionService:
             user_id=user.id,
             user_type=user.user_scope,
             tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
             token_hash=token_h,
             refresh_token_hash=refresh_h,
             auth_method="password",
@@ -189,8 +204,9 @@ class SessionService:
             user_id=user.id,
             user_type=user.user_scope,
             tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
             account_id=account_id,
-            new_values={"event": "login"},
+            new_values={"event": "login", "business_unit_id": business_unit_id},
         )
 
         self._db.commit()
@@ -207,7 +223,20 @@ class SessionService:
             first_name=user.first_name,
             last_name=user.last_name,
             tenant_name=self._tenant_name(tenant_id),
+            **unit_fields,
         )
+
+    def _unit_fields(self, unit: BusinessUnit | None) -> dict[str, object]:
+        """The business unit fields of a login / refresh response."""
+        if unit is None:
+            return {}
+        return {
+            "business_unit_id": unit.id,
+            "business_unit_code": unit.code,
+            "business_unit_name": unit.name,
+            "business_unit_type": unit.bu_type,
+            "multi_store": self._units.is_multi_store(unit.tenant_id),
+        }
 
     def _create_session(
         self,
@@ -215,6 +244,7 @@ class SessionService:
         user_id: str,
         user_type: str,
         tenant_id: str | None,
+        business_unit_id: str | None,
         token_hash: bytes,
         refresh_token_hash: bytes,
         auth_method: str,
@@ -223,7 +253,7 @@ class SessionService:
         user_agent: str | None,
     ) -> AuthSession:
         settings = get_settings()
-        now = _utc_naive_now()
+        now = utc_now()
         expires_at = now + timedelta(minutes=settings.jwt_access_token_expire_minutes)
         refresh_expires_at = now + timedelta(days=settings.jwt_refresh_token_expire_days)
 
@@ -232,6 +262,7 @@ class SessionService:
             user_id=user_id,
             user_type=user_type,
             tenant_id=tenant_id,
+            business_unit_id=business_unit_id,
             token_hash=token_hash,
             refresh_token_hash=refresh_token_hash,
             auth_method=auth_method,
@@ -249,8 +280,7 @@ class SessionService:
         *,
         source: AuditSource | None = None,
     ) -> TokenResponse:
-        settings = get_settings()
-        now = _utc_naive_now()
+        now = utc_now()
         incoming_hash = hash_token(request.refresh_token)
 
         session = self._get_session_by_refresh_hash(incoming_hash)
@@ -280,19 +310,96 @@ class SessionService:
         if user.user_scope in ("tenant", "tenant_account"):
             if session.tenant_id is None or self._usable_tenant(session.tenant_id) is None:
                 self._end_session(session, now, "tenant_inactive")
+        unit: BusinessUnit | None = None
+        account_id: str | None = None
+        account_name: str | None = None
         if user.user_scope == "tenant":
             if self._get_active_tenant_membership(user.id, session.tenant_id) is None:
                 self._end_session(session, now, "membership_inactive")
-
-        account_id: str | None = None
-        account_name: str | None = None
-        if user.user_scope == "tenant_account":
+            # The store must still be active and open to the user; no fallback to another.
+            try:
+                unit = self._units.recheck_session_unit(
+                    session.tenant_id, user.id, session.business_unit_id
+                )
+            except StoreAccessError:
+                self._end_session(session, now, "store_access_removed")
+        elif user.user_scope == "tenant_account":
             account_id = self._require_single_account_membership(
                 user.id,
                 session.tenant_id,
             )
             account_name = self._account_name(account_id)
+            unit = self._units.get_root(session.tenant_id)
 
+        tokens = self._rotate_tokens(
+            session, user, unit,
+            account_id=account_id, account_name=account_name, source=source, now=now,
+        )
+        self._db.commit()
+        return tokens
+
+    def switch_business_unit(
+        self,
+        raw_access_token: str,
+        user: CurrentUser,
+        business_unit_code: str,
+        *,
+        source: AuditSource | None = None,
+    ) -> TokenResponse:
+        """Move a staff session to another store; the old access token stops working.
+
+        Same access rules as login; a denied switch leaves the session as it was.
+        """
+        session = self._get_session_by_access_hash(hash_token(raw_access_token))
+        if session is None or user.tenant_id is None:
+            unauthorized("AUTH", "Session expired or revoked")
+        try:
+            unit = self._units.resolve_login_unit(user.tenant_id, user.user_id, business_unit_code)
+        except StoreAccessError as error:
+            unauthorized("AUTH", str(error))
+
+        previous_unit_id = session.business_unit_id
+        session.business_unit_id = unit.id
+        app_user = self._get_active_user_by_id(user.user_id)
+        if app_user is None:
+            unauthorized("AUTH", "Session expired or revoked")
+        tokens = self._rotate_tokens(session, app_user, unit, source=source, now=utc_now())
+        # dev3's CK_audit_log_action has no switch action: an update of the session row,
+        # named by ``event`` (as logout-all is ``logout`` + ``event``).
+        append_audit_log(
+            self._db,
+            action="update",
+            source=self._source(source, session_id=session.id),
+            schema_name="auth",
+            table_name="session",
+            record_id=session.id,
+            user_id=user.user_id,
+            user_type=user.user_scope,
+            tenant_id=user.tenant_id,
+            business_unit_id=unit.id,
+            old_values={"business_unit_id": previous_unit_id},
+            new_values={"event": "business_unit_switch", "business_unit_id": unit.id},
+        )
+        self._db.commit()
+        return tokens
+
+    def _rotate_tokens(
+        self,
+        session: AuthSession,
+        user: User,
+        unit: BusinessUnit | None,
+        *,
+        account_id: str | None = None,
+        account_name: str | None = None,
+        source: AuditSource | None,
+        now: datetime,
+    ) -> TokenResponse:
+        """Issue a new access + refresh pair for ``session`` (caller commits).
+
+        Older tokens of the session stop working: ``get_current_user`` and refresh compare
+        against the hashes stored here.
+        """
+        settings = get_settings()
         new_access = create_access_token(
             session.user_id,
             _JWT_USER_TYPE_APP,
@@ -300,6 +407,7 @@ class SessionService:
             session.tenant_id,
             account_id,
             session_id=session.id,
+            business_unit_id=session.business_unit_id,
         )
         new_refresh = create_refresh_token(session.user_id, session.id)
 
@@ -314,8 +422,6 @@ class SessionService:
             session.user_agent = source.user_agent
         self._db.add(session)
 
-        self._db.commit()
-
         return TokenResponse(
             access_token=new_access,
             refresh_token=new_refresh,
@@ -328,6 +434,7 @@ class SessionService:
             first_name=user.first_name,
             last_name=user.last_name,
             tenant_name=self._tenant_name(session.tenant_id),
+            **self._unit_fields(unit),
         )
 
     def logout(
@@ -362,7 +469,7 @@ class SessionService:
         current_user_id: str,
         source: AuditSource | None,
     ) -> None:
-        now = _utc_naive_now()
+        now = utc_now()
         session.is_active = False
         session.revoked_at = now
         session.revoke_reason = "logout"
@@ -381,6 +488,7 @@ class SessionService:
             user_id=session.user_id,
             user_type=audit_user_scope,
             tenant_id=session.tenant_id,
+            business_unit_id=session.business_unit_id,
             new_values={"event": "logout"},
         )
         self._db.commit()
@@ -392,7 +500,7 @@ class SessionService:
         *,
         source: AuditSource | None = None,
     ) -> int:
-        now = _utc_naive_now()
+        now = utc_now()
         stmt = select(AuthSession).where(
             AuthSession.user_id == user_id,
             AuthSession.is_active == True,  # noqa: E712
@@ -419,6 +527,7 @@ class SessionService:
                 user_id=user_id,
                 user_type=audit_user_scope,
                 tenant_id=sessions[0].tenant_id,
+                business_unit_id=sessions[0].business_unit_id,
                 new_values={"event": "logout_all", "revoked_count": len(sessions)},
             )
         self._db.commit()

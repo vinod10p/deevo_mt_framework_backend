@@ -12,6 +12,7 @@ from mtf.rpt.models import ReportSavedView
 def _configure_mappers_for_fk_resolution() -> None:
     from mtf.auth.models.user import User  # noqa: F401
     from mtf.rpt.models import ReportDefinition  # noqa: F401
+    from mtf.tenant.models.business_unit import BusinessUnit  # noqa: F401
     from mtf.tenant.models.tenant import Tenant  # noqa: F401
 
     configure_mappers()
@@ -26,6 +27,7 @@ def test_columns_match_ddl() -> None:
     assert set(ReportSavedView.__mapper__.columns.keys()) == {
         "id",
         "tenant_id",
+        "business_unit_id",
         "report_id",
         "scope_type",
         "user_id",
@@ -40,6 +42,7 @@ def test_columns_match_ddl() -> None:
         "updated_at",
         "created_by",
         "updated_by",
+        "deleted_at",
         "deleted_by",
     }
 
@@ -47,6 +50,7 @@ def test_columns_match_ddl() -> None:
 def test_nullability() -> None:
     cols = ReportSavedView.__table__.columns
     assert cols["tenant_id"].nullable is True
+    assert cols["business_unit_id"].nullable is True
     assert cols["user_id"].nullable is True
     for name in ("report_id", "scope_type", "view_name", "criteria_json", "layout_json"):
         assert cols[name].nullable is False, name
@@ -59,6 +63,8 @@ def test_foreign_keys() -> None:
     }
     assert targets == {
         ("tenant_id", "tenant.tenant"),
+        ("business_unit_id", "tenant.business_unit"),
+        ("tenant_id", "tenant.business_unit"),
         ("report_id", "rpt.report_definition"),
         ("user_id", "auth.app_user"),
         ("created_by", "auth.app_user"),

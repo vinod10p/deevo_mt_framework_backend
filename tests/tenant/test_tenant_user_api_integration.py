@@ -7,12 +7,10 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
-from mtf.auth.models.user import User
 from main import app
-from mtf.shared.database import SessionLocal
 from mtf.shared.deps import CurrentUser, get_current_user
+from tests.cleanup import soft_delete_users
 from tests.tenant.conftest import SEEDED_SYSTEM_USER_ID
 
 pytestmark = pytest.mark.integration
@@ -31,17 +29,6 @@ def _unique_email(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}@example.com"
 
 
-def _cleanup_user(user_id: str) -> None:
-    with SessionLocal() as db:
-        user = db.scalars(select(User).where(User.id == user_id)).first()
-        if user is None:
-            return
-        user.is_active = False
-        user.is_deleted = True
-        user.updated_by = SEEDED_SYSTEM_USER_ID
-        user.deleted_by = SEEDED_SYSTEM_USER_ID
-        db.add(user)
-        db.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -103,17 +90,23 @@ def test_tenant_user_master_detail_flow(client: TestClient) -> None:
         assert any(row["user_id"] == user_id for row in listed)
 
         row_version = created["row_version"]
+        membership_url = f"/api/tenant/{tenant_id}/users/{user_id}"
+
+        # The tenant's only admin can't be deactivated, even in the same request.
+        last_admin = client.patch(
+            membership_url,
+            json={"row_version": row_version, "role": "admin", "is_active": False},
+        )
+        assert last_admin.status_code == 409, last_admin.text
+        assert last_admin.json()["detail"]["code"] == "TENANT_USER_CONFLICT"
+
         update_user = client.patch(
-            f"/api/tenant/{tenant_id}/users/{user_id}",
-            json={
-                "row_version": row_version,
-                "role": "admin",
-                "is_active": False,
-            },
+            membership_url,
+            json={"row_version": row_version, "is_active": False},
         )
         assert update_user.status_code == 200, update_user.text
         updated = update_user.json()
-        assert updated["role"] == "admin"
+        assert updated["role"] == "member"
         assert updated["is_active"] is False
         assert updated["row_version"] != row_version
 
@@ -137,7 +130,7 @@ def test_tenant_user_master_detail_flow(client: TestClient) -> None:
         if tenant_id is not None:
             client.delete(f"/api/tenant/{tenant_id}")
         if user_id is not None:
-            _cleanup_user(user_id)
+            soft_delete_users(user_id)
 
 
 def test_create_tenant_user_duplicate_email_409(client: TestClient) -> None:
@@ -187,4 +180,4 @@ def test_create_tenant_user_duplicate_email_409(client: TestClient) -> None:
         if tenant_id is not None:
             client.delete(f"/api/tenant/{tenant_id}")
         if user_id is not None:
-            _cleanup_user(user_id)
+            soft_delete_users(user_id)

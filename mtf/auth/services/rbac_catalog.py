@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -13,10 +13,7 @@ from mtf.auth.models.role import Role
 from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.db_integrity import is_unique_constraint_violation
 from mtf.shared.exceptions import bad_request, conflict, not_found
-
-
-def utc_naive_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+from mtf.shared.model_columns import StandardColumnsMixin
 
 
 def compose_permission_code(resource_type: str, resource_code: str, action: str) -> str:
@@ -88,15 +85,10 @@ def require_export_needs_view(
         bad_request(code_prefix, "can_export requires can_view")
 
 
-def apply_soft_delete(row: object, *, deleted_by: str) -> datetime:
-    now = utc_naive_now()
-    row.is_active = False  # type: ignore[attr-defined]
-    row.is_deleted = True  # type: ignore[attr-defined]
-    row.deleted_at = now  # type: ignore[attr-defined]
-    row.deleted_by = deleted_by  # type: ignore[attr-defined]
-    row.updated_at = now  # type: ignore[attr-defined]
-    row.updated_by = deleted_by  # type: ignore[attr-defined]
-    return now
+def apply_soft_delete(row: StandardColumnsMixin, *, deleted_by: str) -> datetime:
+    """Deactivate and soft-delete a catalog row."""
+    row.is_active = False
+    return row.mark_deleted(deleted_by)
 
 
 def commit_or_conflict(db: Session, *, code_prefix: str, message: str) -> None:

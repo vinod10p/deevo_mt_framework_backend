@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -26,7 +26,11 @@ from mtf.auth.services.rbac_assignment import (
 from mtf.auth.services.tenant_role import TenantRoleService
 from mtf.auth.services.user_role import UserRoleService
 from mtf.shared.deps import CurrentUser
+from mtf.tenant.services.business_unit_service import BusinessUnitService
+from tests.conftest import TEST_BUSINESS_UNIT_ID as ROOT_ID
 from tests.tenant.conftest import TEST_TENANT_ID, TEST_USER_ID
+
+STORE_ID = "01HZYJZGXM0KV0K4T8Y9STORE1"
 
 _NOW = datetime(2026, 5, 9, 12, 0, 0)
 _ROW_VER = bytes(range(8))
@@ -356,16 +360,76 @@ def test_assign_role_audits() -> None:
     resolver = MagicMock()
     resolver.permission_codes.return_value = frozenset({"screen.lead.view"})
     svc = UserRoleService(db)
-    row = svc.create(
-        TEST_TENANT_ID,
-        TEST_USER_ID,
-        UserRoleCreate(role_id=role.id),
-        resolver=resolver,
-        actor=ACTOR,
-        created_by=TEST_USER_ID,
-    )
+    with patch.object(BusinessUnitService, "default_store_id", return_value=STORE_ID):
+        row = svc.create(
+            TEST_TENANT_ID,
+            TEST_USER_ID,
+            UserRoleCreate(role_id=role.id),
+            resolver=resolver,
+            actor=ACTOR,
+            created_by=TEST_USER_ID,
+        )
+    assert row.business_unit_id == STORE_ID  # a custom role lands at the default store
     assert row.account_id is None
     assert row.user_scope == "tenant"
     [log] = _added(db, AuditLog)
     assert (log.action, log.table_name) == ("insert", "user_role")
     assert isinstance(_added(db, UserRole)[0], UserRole)
+
+
+# --- where an assignment is held (decision 10, step 8) ----------------------------------
+
+
+def _unit_for(
+    role: Role,
+    requested_id: str | None,
+    *,
+    default_store: str | None = STORE_ID,
+    known_units: frozenset[str] = frozenset({ROOT_ID, STORE_ID}),
+) -> str:
+    with (
+        patch.object(BusinessUnitService, "default_store_id", return_value=default_store),
+        patch.object(
+            BusinessUnitService,
+            "get_active",
+            side_effect=lambda _tenant, unit_id: unit_id if unit_id in known_units else None,
+        ),
+    ):
+        return UserRoleService(MagicMock())._assignment_unit(
+            TEST_TENANT_ID, TEST_USER_ID, role, requested_id
+        )
+
+
+@pytest.mark.parametrize(
+    ("tenant_wide", "requested", "expected"),
+    [
+        (True, None, ROOT_ID),  # tenant-wide roles default to every store
+        (False, None, STORE_ID),  # custom roles default to the user's default store
+        (False, STORE_ID, STORE_ID),
+        (True, STORE_ID, STORE_ID),
+        (True, ROOT_ID, ROOT_ID),
+    ],
+)
+def test_assignment_unit(tenant_wide: bool, requested: str | None, expected: str) -> None:
+    assert _unit_for(_role(is_tenant_wide=tenant_wide), requested) == expected
+
+
+@pytest.mark.parametrize(
+    ("requested", "default_store"),
+    [(ROOT_ID, STORE_ID), (None, None)],
+    ids=["root-named", "no-default-store"],
+)
+def test_custom_role_at_root_is_refused(requested: str | None, default_store: str | None) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        _unit_for(_role(is_tenant_wide=False), requested, default_store=default_store)
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "code": "AUTH_ROLE_CONFLICT", "message": "This role can only be assigned to a store",
+    }
+
+
+def test_unit_of_another_tenant_is_not_found() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        _unit_for(_role(), "01HZYJZGXM0KV0K4T8Y9OTHER1")
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "TENANT_BUSINESS_UNIT_NOT_FOUND"

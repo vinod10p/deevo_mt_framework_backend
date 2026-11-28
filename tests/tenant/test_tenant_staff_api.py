@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import Depends
 from fastapi.testclient import TestClient
 
 from main import app
@@ -16,7 +15,6 @@ from mtf.tenant.api.tenant_staff import (
     require_owner_or_admin,
 )
 from mtf.tenant.schemas import TenantUserCreate
-
 from tests.tenant.conftest import (
     TEST_TENANT_ID,
     TEST_USER_ID,

@@ -30,11 +30,11 @@ from mtf.auth.services.rbac_catalog import (
     apply_soft_delete,
     commit_or_conflict,
     require_live_permission,
-    utc_naive_now,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import bad_request, conflict, not_found, row_version_conflict
-from mtf.shared.security import generate_id
+from mtf.tenant.business_units import root_unit_id
 
 
 class TenantRoleService:
@@ -84,16 +84,15 @@ class TenantRoleService:
         if self._live_by_code(tenant_id, data.code) is not None:
             conflict("AUTH_ROLE", "Role code already exists in this tenant")
 
-        row = Role(
-            id=generate_id(),
+        row = Role.new(
+            by=created_by,
             tenant_id=tenant_id,
+            business_unit_id=root_unit_id(self._db, tenant_id),
             code=data.code,
             name=data.name,
             description=data.description,
             user_scope="tenant",
             is_system=False,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -136,7 +135,7 @@ class TenantRoleService:
         updates = data.model_dump(exclude_none=True, exclude={"row_version"})
         for key, value in updates.items():
             setattr(row, key, value)
-        row.updated_at = utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 
@@ -236,13 +235,11 @@ class TenantRoleService:
         if self._live_grant(role.id, permission.id) is not None:
             conflict("AUTH_ROLE_PERMISSION", "Permission is already granted to this role")
 
-        row = RolePermission(
-            id=generate_id(),
+        row = RolePermission.new(
+            by=created_by,
             role_id=role.id,
             permission_id=permission.id,
             user_scope=role.user_scope,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(

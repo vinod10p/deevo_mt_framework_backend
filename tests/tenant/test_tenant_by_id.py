@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from main import app
 from mtf.tenant.api.tenant import get_tenant_service
-
 from tests.tenant.conftest import TEST_TENANT_ID, minimal_tenant
 
 

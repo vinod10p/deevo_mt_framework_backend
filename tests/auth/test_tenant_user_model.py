@@ -34,11 +34,12 @@ def test_tenant_user_column_mapping() -> None:
         "id",
         "default_member_role_enabled",
         "tenant_id",
+        "business_unit_id",
+        "default_business_unit_id",
         "user_id",
         "role",
         "invited_at",
         "invited_by",
-        "invite_token",
         "joined_at",
         "is_active",
         "is_deleted",
@@ -47,16 +48,28 @@ def test_tenant_user_column_mapping() -> None:
         "updated_at",
         "created_by",
         "updated_by",
+        "deleted_at",
         "deleted_by",
     }
 
 
 def test_tenant_user_foreign_key_targets() -> None:
-    targets = {(fk.column.table.fullname, fk.column.key) for fk in TenantUser.__table__.foreign_keys}
+    targets = {
+        (fk.column.table.fullname, fk.column.key) for fk in TenantUser.__table__.foreign_keys
+    }
     assert ("tenant.tenant", "id") in targets
     assert ("auth.app_user", "id") in targets
-    # All app_user FKs should point at auth.app_user.id
-    assert all(fk.column.table.fullname == "auth.app_user" for fk in TenantUser.__table__.foreign_keys if fk.parent.key != "tenant_id")
+    assert ("tenant.business_unit", "id") in targets
+    # Both unit columns pair with tenant_id, so a member can't point at another tenant's unit.
+    unit_fks = {
+        tuple(constraint.column_keys)
+        for constraint in TenantUser.__table__.foreign_key_constraints
+        if constraint.referred_table.fullname == "tenant.business_unit"
+    }
+    assert unit_fks == {
+        ("business_unit_id", "tenant_id"),
+        ("default_business_unit_id", "tenant_id"),
+    }
 
 
 def test_tenant_user_repr_includes_core_fields() -> None:

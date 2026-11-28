@@ -64,6 +64,17 @@ class MeReportGrantRead(BaseModel):
     can_export: bool
 
 
+class MeBusinessUnitRead(BaseModel):
+    """A business unit as the app shows it (current store, store switcher)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    code: str
+    name: str
+    bu_type: str
+
+
 class UserMeRead(BaseModel):
     """``GET /api/auth/me`` — profile plus tenant membership when ``user_scope=tenant``."""
 
@@ -112,6 +123,13 @@ class UserMeRead(BaseModel):
 
     permissions: list[str] = Field(default_factory=list)
     reports: list[MeReportGrantRead] = Field(default_factory=list)
+
+    #: The session's unit (portal users: the tenant root; system users: none).
+    business_unit: MeBusinessUnitRead | None = None
+    #: The tenant has more than one active store, so the app shows the store switcher.
+    multi_store: bool = False
+    #: Units a staff user may switch to, in ``sort_order`` (the root only with a root role).
+    business_units: list[MeBusinessUnitRead] = Field(default_factory=list)
 
 
 class UserRead(BaseModel):

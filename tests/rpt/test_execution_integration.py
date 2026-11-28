@@ -88,7 +88,7 @@ def test_report_proc_truncation_with_max_rows_one(seeded: dict[str, object]) -> 
             [("@SearchText", None), ("@Values", None)],
             max_rows=1, expected_columns=["value", "label"],
         )
-    assert full.truncated is False and len(full.rows) == 4
+    assert full.truncated is False and len(full.rows) == 2  # admin, member
     assert one.truncated is True and len(one.rows) == 1
 
 
@@ -96,10 +96,10 @@ def test_lookup_values_filter_bound_as_json(seeded: dict[str, object]) -> None:
     with open_report_connection(seeded["tenant_id"], TEST_USER_ID) as conn:  # type: ignore[arg-type]
         result = execute_proc(
             conn, "rpt.usp_lookup_tenant_user_role",
-            [("@SearchText", None), ("@Values", '["admin","viewer"]')],
+            [("@SearchText", None), ("@Values", '["member"]')],
             max_rows=50, expected_columns=["value", "label"],
         )
-    assert [row[0] for row in result.rows] == ["admin", "viewer"]
+    assert [row[0] for row in result.rows] == ["member"]
 
 
 def test_session_context_cleared_before_reuse(

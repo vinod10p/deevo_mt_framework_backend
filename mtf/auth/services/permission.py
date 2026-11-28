@@ -19,11 +19,10 @@ from mtf.auth.services.rbac_catalog import (
     commit_or_conflict,
     compose_permission_code,
     require_live_permission,
-    utc_naive_now,
 )
+from mtf.shared.clock import utc_now
 from mtf.shared.deps import CurrentUser
 from mtf.shared.exceptions import conflict, row_version_conflict
-from mtf.shared.security import generate_id
 
 
 class PermissionService:
@@ -96,8 +95,8 @@ class PermissionService:
 
         resource_name = data.resource_name if data.resource_name is not None else data.resource_code
         is_tenant_grantable = False if data.user_scope == "system" else data.is_tenant_grantable
-        row = Permission(
-            id=generate_id(),
+        row = Permission.new(
+            by=created_by,
             code=code,
             resource_type=data.resource_type,
             resource_code=data.resource_code,
@@ -108,8 +107,6 @@ class PermissionService:
             resource_name=resource_name,
             sort_order=data.sort_order,
             is_tenant_grantable=is_tenant_grantable,
-            created_by=created_by,
-            updated_by=created_by,
         )
         self._db.add(row)
         audit_insert(
@@ -147,7 +144,7 @@ class PermissionService:
             setattr(row, key, value)
         if row.user_scope == "system":
             row.is_tenant_grantable = False
-        row.updated_at = utc_naive_now()
+        row.updated_at = utc_now()
         if updated_by is not None:
             row.updated_by = updated_by
 

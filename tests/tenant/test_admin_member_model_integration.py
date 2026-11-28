@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -9,13 +10,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from main import app
-from mtf.shared.database import SessionLocal, engine
+from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
-from tests.auth.test_rbac_screens_flag_integration import _batches
-from tests.tenant.rbac_fixtures import assign_role, create_member, custom_role
+from tests.sql_scripts import apply_sql_script
+from tests.staff_login import staff_headers
+from tests.tenant.rbac_fixtures import (
+    THIN_ADMIN_PERMISSIONS,
+    assign_role,
+    create_member,
+    custom_role,
+)
 from tests.tenant.test_tenant_multi_role_integration import (
     _cleanup,
-    _login,
     _me_permissions,
     _role_codes,
     _setup,
@@ -25,24 +31,12 @@ from tests.tenant.test_tenant_multi_role_integration import (
 pytestmark = pytest.mark.integration
 
 FIX_PATH = Path(__file__).resolve().parents[2] / "sql" / "rbac_fix_05_admin_member_only.sql"
-_ADMIN_BUNDLE = {
-    "api.auth.role.update",
-    "menu.admin_users.view",
-    "menu.admin_portal_accounts.view",
-}
-
 
 @pytest.fixture(scope="module", autouse=True)
 def _applied() -> None:
-    sql = FIX_PATH.read_text(encoding="utf-8")
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        try:
-            for batch in _batches(sql):
-                if batch.lstrip().upper().startswith("USE "):
-                    continue
-                conn.execute(text(batch))
-        finally:
-            conn.execute(text("SET NOCOUNT OFF; SET XACT_ABORT OFF"))
+    if os.environ.get("DEEVO_SKIP_DB_TESTS", "").lower() in ("1", "true", "yes"):
+        pytest.skip("DEEVO_SKIP_DB_TESTS is set")
+    apply_sql_script(FIX_PATH)
 
 
 def test_admin_thin_member_empty_and_custom_roles(client: TestClient) -> None:
@@ -51,11 +45,11 @@ def test_admin_thin_member_empty_and_custom_roles(client: TestClient) -> None:
     user_ids = [ctx["owner_user_id"]]
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        admin = _login(
+        admin = staff_headers(
             client, email=ctx["owner_email"], password="OwnerSecret123!", tenant_id=tenant_id
         )
         assert set(_role_codes(client, admin, ctx["owner_user_id"]).values()) == {"tenant_admin"}
-        assert _ADMIN_BUNDLE <= _me_permissions(client, admin)
+        assert THIN_ADMIN_PERMISSIONS <= _me_permissions(client, admin)
         assert not any(c.startswith("screen.") for c in _me_permissions(client, admin))
         modules = client.get("/api/nav/modules", headers=admin)
         assert modules.status_code == 200
@@ -63,7 +57,7 @@ def test_admin_thin_member_empty_and_custom_roles(client: TestClient) -> None:
 
         member_id, member_email = create_member(client, admin)
         user_ids.append(member_id)
-        member = _login(
+        member = staff_headers(
             client, email=member_email, password="MemberSecret123!", tenant_id=tenant_id
         )
         assert _role_codes(client, admin, member_id) == {}
@@ -107,7 +101,7 @@ def test_admin_thin_member_empty_and_custom_roles(client: TestClient) -> None:
             "tenant_admin",
             role["code"],
         }
-        assert _ADMIN_BUNDLE <= _me_permissions(client, member)
+        assert THIN_ADMIN_PERMISSIONS <= _me_permissions(client, member)
 
         # Demote back: loses template, keeps custom.
         staff = client.get(f"/api/tenant/users/{member_id}", headers=admin).json()

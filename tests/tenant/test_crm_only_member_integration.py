@@ -10,10 +10,10 @@ from main import app
 from mtf.rpt.models.report_definition import ReportDefinition
 from mtf.shared.database import SessionLocal
 from mtf.shared.deps import get_current_user
+from tests.staff_login import staff_headers
 from tests.tenant.rbac_fixtures import assign_role, create_member, custom_role
 from tests.tenant.test_tenant_multi_role_integration import (
     _cleanup,
-    _login,
     _me_permissions,
     _setup,
     stub_system_user,  # noqa: F401
@@ -62,12 +62,12 @@ def test_member_with_only_custom_role_access(client: TestClient) -> None:
     user_ids = [ctx["owner_user_id"]]
     try:
         app.dependency_overrides.pop(get_current_user, None)
-        admin = _login(
+        admin = staff_headers(
             client, email=ctx["owner_email"], password="OwnerSecret123!", tenant_id=tenant_id
         )
         member_id, member_email = create_member(client, admin)
         user_ids.append(member_id)
-        member = _login(
+        member = staff_headers(
             client, email=member_email, password="MemberSecret123!", tenant_id=tenant_id
         )
         assert _me_permissions(client, member) == set()
