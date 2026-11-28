@@ -1,4 +1,4 @@
-"""Live SQL Server tests for ``audit.audit_log`` on ``deevo_app_dev2``.
+"""Live SQL Server tests for ``audit.audit_log`` on the configured database (``.env``).
 
 Writes go through the HTTP API as ``deevo_app`` (SELECT/INSERT only). Audit rows
 are append-only and are left in place; tenants created here are soft-deleted.
@@ -16,6 +16,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
 from mtf.audit.models import AuditLog
+from mtf.shared.config import get_settings
 from mtf.shared.database import SessionLocal, engine
 from tests.cleanup import soft_delete_users
 from tests.staff_login import staff_headers
@@ -23,7 +24,6 @@ from tests.staff_login import staff_headers
 pytestmark = pytest.mark.integration
 
 LOGS_URL = "/api/audit/logs"
-TARGET_DATABASE = "deevo_app_dev2"
 
 
 def _skip_if_disabled() -> None:
@@ -32,7 +32,8 @@ def _skip_if_disabled() -> None:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def require_dev2_database() -> None:
+def require_configured_database() -> None:
+    """Audit rows are permanent: write them only to the database ``.env`` names."""
     _skip_if_disabled()
     try:
         with engine.connect() as conn:
@@ -46,10 +47,9 @@ def require_dev2_database() -> None:
             ).first()
     except DBAPIError as exc:
         pytest.skip(f"database not available: {exc.__class__.__name__}")
-    if str(name).lower() != TARGET_DATABASE:
-        pytest.skip(
-            f"audit integration targets {TARGET_DATABASE}, connected to {name}"
-        )
+    configured = get_settings().mssql_database
+    if str(name).lower() != configured.lower():
+        pytest.skip(f"audit integration targets {configured}, connected to {name}")
     if table is None:
         pytest.skip("audit.audit_log is not present")
 
@@ -262,19 +262,7 @@ def test_tenant_jwt_cannot_read_unscoped_log(
         assert staff.status_code == 201, staff.text
         user_id = staff.json()["user_id"]
 
-        login = client.post(
-            "/api/auth/login",
-            json={
-                "email": email,
-                "password": password,
-                "created_from": "web",
-                "tenant_id": tenant_id,
-            },
-        )
-        assert login.status_code == 200, login.text
-        tenant_headers = {
-            "Authorization": f"Bearer {login.json()['access_token']}",
-        }
+        tenant_headers = staff_headers(client, email, tenant_id, password=password)
 
         own = _list_logs(client, tenant_headers, limit=50)
         assert own

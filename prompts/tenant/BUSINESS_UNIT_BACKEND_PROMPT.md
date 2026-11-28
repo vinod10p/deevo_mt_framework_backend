@@ -4,8 +4,17 @@ Workspace: **`deevo_mt_framework_backend`**, branch **`dev/bu`**. Database: **`d
 Backend only. The React screens are a separate prompt for the frontend repo
 (`BUSINESS_UNIT_FRONTEND_PROMPT.md`, written in this repo, implemented there with its own tool).
 
-Governing design: [`../../sql/business_unit_database_design.md`](../../sql/business_unit_database_design.md).
-Default units SQL: [`../../sql/dev3_10_business_unit_defaults.sql`](../../sql/dev3_10_business_unit_defaults.sql).
+**Status (Nov 27, 2026): steps 0–9 done** on branch `dev/bu` (not committed). dev3 integration
+suite: 166 passed, 0 failed in the last full run; the 6 audit tests then also pass on dev3, so the
+only skips left are 8 saved-view tests that need an empty saved-view table. Follow-ups after
+step 9 are in the "After step 9" section below.
+
+Governing design: [`../../sql/business_unit_database_design.md`](../../sql/business_unit_database_design.md)
+(decisions D1–D15, as-built status in §0 and §7).
+dev3 scripts: [`dev3_10_business_unit_defaults.sql`](../../sql/dev3_10_business_unit_defaults.sql)
+(root + `MAIN` per tenant), [`dev3_11_rpt_procedures.sql`](../../sql/dev3_11_rpt_procedures.sql),
+[`dev3_12_move_custom_roles_to_store.sql`](../../sql/dev3_12_move_custom_roles_to_store.sql),
+[`dev3_13_integrity_triggers.sql`](../../sql/dev3_13_integrity_triggers.sql).
 
 Not in this prompt (later prompts): the `TenantBUMixin` / repository **read filter** for business
 tables, business-unit admin CRUD screens, reports filtered by store, inventory and email modules
@@ -18,7 +27,8 @@ mailbox endpoints and tests failing on dev3 are expected).
 
 1. **A tenant has many business units.** Each tenant has exactly one `bu_type = 'root'` unit
    (code `COMPANY`, name = tenant name) and at least one store (first one code `MAIN`).
-   Logic checks **`bu_type` only**, never `code` or `name`.
+   Logic checks **`bu_type` only**, never `code` or `name` — one agreed exception: the `MAIN`
+   fallback in decision 7.
 2. **Login screen** (shared URL): Company, **Store**, Email, Password — all typed text fields.
    No dropdown and no public lookup of stores. The frontend prefills Store with the last store
    used on that device.
@@ -47,13 +57,19 @@ mailbox endpoints and tests failing on dev3 are expected).
 9. **Effective permissions in a session** = roles assigned at the root unit **+** roles assigned
    at the session's unit. In "All stores" mode (session unit = root) only root roles count.
 10. **Root assignment rule:** a tenant-scope role may be assigned at the root unit only if
-    `role.is_tenant_wide = 1` (platform `tenant_admin` is tenant-wide). Enforced on **new**
-    assignments only; rows migrated to root stay valid (see open item Q1).
+    `role.is_tenant_wide = 1` (only platform `tenant_admin` is tenant-wide). Enforced by the
+    service on new assignments; an assignment without a store goes to the root for a
+    tenant-wide role, else to the user's default store (step 8). Custom-role rows migrated to
+    root were moved to stores (Q1, option B, `dev3_12`).
 11. **The session row is the source of truth** for the current unit. The JWT carries
     `business_unit_id` for convenience, but `get_current_user` reads the session's value.
-12. **Store switch** is an API (`POST /auth/session/business-unit`) using the same access rules
-    as login. It updates the session and returns a new access token; the old access token stops
-    working immediately (same rotation rule as refresh).
+12. **Store switch** is an API (`POST /auth/session/business-unit`, browser variant
+    `/auth/browser/session/business-unit`) using the same access rules as login. It updates the
+    session and returns a new access **and refresh** token pair (the session keeps only token
+    hashes); the old tokens stop working immediately. A refused switch is a `401` with the
+    decision-6 message and leaves the session unchanged. Audited as `action = 'update'` on
+    `auth.session` with `new_values.event = 'business_unit_switch'` (dev3's
+    `CK_audit_log_action` has no switch action).
 13. **Refresh** re-checks the session's unit: still active and still allowed for the user. If
     not, the session ends (`401 AUTH_UNAUTHORIZED`, reason `store_access_removed`). No fallback.
 14. **Membership dual-write** (`mtf/auth/services/membership_rbac.py`) writes new
@@ -63,8 +79,9 @@ mailbox endpoints and tests failing on dev3 are expected).
 16. **dev3 already enforces business units.** Every insert into a tenant table must set
     `business_unit_id`, or the database rejects it (`NOT NULL` or a `CK_*_tenant_bu` /
     `CK_*_scope` check). Until store-owned data exists, **every tenant row is written at the
-    tenant's root unit**, except `auth.session` (the session's unit) and `audit.audit_log`
-    (the acting session's unit, else root). Platform / system rows keep `business_unit_id = NULL`.
+    tenant's root unit**, except `auth.session` (the session's unit), `audit.audit_log`
+    (the acting session's unit, else root) and staff `auth.user_role` rows of non-tenant-wide
+    roles (a store, decision 10). Platform / system rows keep `business_unit_id = NULL`.
 
 ---
 
@@ -108,7 +125,7 @@ fields, `timezone`, `currency`, `sort_order`, standard columns.
 | `auth.session` | `CK_session_tenant_bu`: set for tenant / portal, NULL for system | session's unit |
 | `audit.audit_log` | `CK_audit_log_tenant_bu`: set when `tenant_id` set | acting session's unit, else root |
 | `auth.role` | `CK_role_tenant_bu`: set when `tenant_id` set | root (tenant roles) |
-| `auth.user_role` | `CK_user_role_scope_shape`: set for tenant / portal rows | root (store later, step 8) |
+| `auth.user_role` | `CK_user_role_scope_shape`: set for tenant / portal rows | root for tenant-wide roles and portal rows; a store for other staff roles (step 8, `dev3_12`) |
 | `rpt.report_definition` | `CK_report_definition_scope`: set for `scope_type = 'tenant'` | root |
 | `rpt.report_saved_view` | `CK_report_saved_view_scope`: set for `tenant` / `user` scope | root |
 
@@ -137,7 +154,8 @@ touched here use it (the other model files still repeat the columns — convert 
 the header comment used to switch pooled connections to dev2).
 Findings for step 2: dev3 has `CK_<table>_deleted` on every table, so every soft delete must
 set `deleted_at` and `deleted_by`; dev3 has **no triggers** (dev2's
-`TR_tenant_setting_rbac_screens_one_way` and the RBAC triggers were not recreated).
+`TR_tenant_setting_rbac_screens_one_way` and the RBAC triggers were not recreated) —
+resolved after step 9 by `dev3_13` (and `dev3_11` for the report trigger).
 
 - New `mtf/tenant/models/business_unit.py` (`BusinessUnit`), exported from `mtf.tenant.models`.
 - Map `business_unit_id` on all 14 models in the table above (nullability exactly as dev3),
@@ -157,14 +175,16 @@ because rows referencing a unit have no ORM relationship to order them),
 `DefaultRoleReport` moved onto the mixin. Tests: `tests/cleanup.py` replaces six copied
 clean-up helpers; `tests/conftest.py` answers unit lookups for mock sessions.
 dev3 result: 1070 passed, 40 failed — none from business units. Remaining: missing `rpt`
-procedures in dev3 (dev2 has 38, dev3 0). Stale tests (retired `tenant_member` template,
+procedures in dev3 (dev2 has 38, dev3 0) — resolved by `dev3_11`; the last 7 report failures
+were stale admin/member tests, fixed with `tests/tenant/rbac_fixtures.report_access`. Stale tests (retired `tenant_member` template,
 `screen.lead.view` for admins, last-admin rule) were updated to the admin/member model
 (`THIN_ADMIN_PERMISSIONS` in `tests/tenant/rbac_fixtures.py`). The six tests that re-run dev2
 SQL scripts are not run on dev3.
 
 Goal: everything that worked on dev2 works on dev3 again. No store filtering, no login change.
-- `BusinessUnitService.get_root(tenant_id)` and `get_main(tenant_id)` (small, cached per
-  request / session object), used by the writers below.
+- As built: `mtf/tenant/business_units.py` (`root_unit_id`, cached per process;
+  `first_store_id`; `membership_units`) instead of `get_root` / `get_main`, used by the writers
+  below.
 - `TenantService.create_tenant`: create root (`COMPANY`, name = tenant name, address and
   timezone from the tenant) and store `MAIN` in the same transaction, **before** any other
   tenant row or audit row is written (decision 15).
@@ -276,9 +296,9 @@ the old / new unit (confirmed Nov 26, 2026). Note for the frontend: a denied swi
 
 - `POST /auth/session/business-unit` body `{ "business_unit_code": "MAYFAIR" }`, tenant scope.
 - Same rules as login (decisions 6–8). On success: update `session.business_unit_id`, rotate
-  the access token hash on the session, audit `business_unit_switch` (old and new unit), return
-  the same body as refresh (`/auth/browser/...` variant returns the browser shape, no refresh
-  token in the body).
+  the access **and refresh** token hashes on the session, audit the switch (`update` + event,
+  old and new unit), return the same body as refresh (`/auth/browser/...` variant returns the
+  browser shape and puts the new refresh token in the cookie).
 - Tests: allowed switch; denied switch (same 401 message, session unchanged); old access token
   rejected after a switch; portal and system users get 403 `AUTH_FORBIDDEN`.
 
@@ -292,11 +312,11 @@ tenant (404 `TENANT_BUSINESS_UNIT_NOT_FOUND`); the root only for tenant-wide rol
 role is held at one unit; 409 when held at several. Tests: `tests/auth/test_rbac_assignment.py`,
 `tests/auth/test_store_role_assignment_integration.py`.
 Note: tenants cannot mark custom roles tenant-wide yet (no field in `TenantRoleCreate`), so only
-platform `tenant_admin` can be held at the root through this API (see Q1).
+platform `tenant_admin` can be held at the root through this API (see Q4).
 
 (Onboarding and dual-write at root are done in step 2.)
 - `POST /tenant/users/{user_id}/roles`: optional `business_unit_id` in `UserRoleCreate`
-  (default root). Reject a unit of another tenant (404) and a non-tenant-wide role at root
+  (default: root for tenant-wide roles, else the user's default store — see "Done" above). Reject a unit of another tenant (404) and a non-tenant-wide role at root
   (`409 AUTH_ROLE_CONFLICT`, "This role can only be assigned to a store"). List and delete
   include `business_unit_id`; the unique key includes it, so one role can be held at two stores.
 - Tests: assignment rules above; the same role held at two stores; revoking at one store
@@ -313,12 +333,49 @@ login request/response fields, error messages, "remember store on this device", 
 switcher using `/me.business_units` and the switch endpoint, hiding store UI when
 `multi_store = false`. Do not implement React.
 
+### After step 9 — database and test follow-ups ✅ done (Nov 27, 2026)
+- **Report procedures:** `dev3_11` copied dev2's 38 `rpt.usp_*` procedures and
+  `rpt.TR_report_definition_scope_guard`. The CRM ones fail at run time until the `crm` schema
+  is in dev3.
+- **Q1 option B:** `dev3_12` moved 30 custom-role assignments from root to the member's default
+  store (0 retired, 0 left at root; only 2 were in a live tenant, `lg`). Every change is logged in
+  `auth.user_role_store_move_log`; the undo SQL is at the end of the script. Running it again
+  changes nothing.
+- **Integrity triggers:** `dev3_13` copied `auth.TR_user_role_integrity`,
+  `TR_role_report_integrity`, `TR_default_role_report_integrity`, `TR_role_tenant_immutable` and
+  `tenant.TR_tenant_setting_rbac_screens_one_way`, unchanged (the composite unit FK already keeps
+  each row's unit in its tenant). The 15 constraint tests that skipped now run;
+  `test_role_tenant_id_is_immutable` and `test_report_scope_guard_while_granted` clear
+  `business_unit_id` together with `tenant_id`, so the trigger (not `CK_*_tenant_bu`) is what
+  refuses. The eight `email.*` triggers wait for the email migration.
+- **Test clean-up:** live test tenants leaked because a module-scoped fixture deleted them
+  through the API after the per-test override reset. New `tests/cleanup.soft_delete_tenants`
+  deletes in the database and fails loudly; used by `tests/auth/conftest.staff` and the business
+  unit service fixture. 28 leftover test tenants and their 24 `@example.com` users were
+  soft-deleted in dev3.
+- **Audit tests:** `tests/audit/test_audit_integration.py` now targets the database named in
+  `.env` (`DEEVO_MSSQL_DATABASE`) instead of a hard-coded dev2; all 6 pass on dev3, including the
+  append-only check for the `deevo_app` login.
+- **Shared test helpers:** `tests/staff_login.py` (`login_staff`, `staff_headers`, `bearer`,
+  `PASSWORD`; store `MAIN` by default), `tests/business_unit_fixtures.py` (`add_stores`,
+  `grant_store_role`), `tests/tenant/rbac_fixtures.report_access`.
+- **Not run on dev3:** the six tests that re-apply old dev2 SQL scripts
+  (`test_admin_member_model_integration`, `test_rbac_backfill_integration`,
+  `test_rbac_fix_04_integration`, `test_rbac_seed_integration`,
+  `test_rbac_tenant_catalog_seed_integration`, `test_rbac_screens_flag_integration`).
+
 ---
 
 ## Open items for review
 
-| # | Question | Proposed |
+| # | Question | State |
 | --- | --- | --- |
-| Q1 | Existing custom-role assignments were migrated to root, but custom roles default to `is_tenant_wide = 0`. Leave them, move them to `MAIN`, or mark those roles tenant-wide? | ✅ **Decided Nov 26, 2026: option B — move them to a store.** `sql/dev3_12_move_custom_roles_to_store.sql` moves live staff assignments of non-tenant-wide roles from the root to the member's default store (else `MAIN`); applied to dev3: 30 moved, 0 retired, 0 left at root; portal and `tenant_admin` rows untouched. Logged in `auth.user_role_store_move_log` (undo SQL at the end of the script). Effect: those users keep their permissions at that store but can no longer log in to "All stores". Tenants still cannot create tenant-wide custom roles (no field in `TenantRoleCreate`) |
-| Q2 | Should root ("All stores") mode be offered to root-role users at login, or only through the switcher? | Both: typing the root code at login is allowed for root-role users |
-| Q3 | Token claim name: `business_unit_id` or a short `bu`? | `business_unit_id`, matching `tenant_id` / `account_id` |
+| Q1 | Existing custom-role assignments were migrated to root, but custom roles default to `is_tenant_wide = 0`. Leave them, move them to `MAIN`, or mark those roles tenant-wide? | ✅ **Decided Nov 26, 2026: option B — move them to a store.** `sql/dev3_12_move_custom_roles_to_store.sql` moves live staff assignments of non-tenant-wide roles from the root to the member's default store (else `MAIN`); applied to dev3: 30 moved, 0 retired, 0 left at root; portal and `tenant_admin` rows untouched. Logged in `auth.user_role_store_move_log` (undo SQL at the end of the script). Effect: those users keep their permissions at that store but can no longer log in to "All stores" |
+| Q2 | Should root ("All stores") mode be offered to root-role users at login, or only through the switcher? | ✅ Built: both — typing the root code at login is allowed for root-role users |
+| Q3 | Token claim name: `business_unit_id` or a short `bu`? | ✅ Built: `business_unit_id`, matching `tenant_id` / `account_id` |
+| Q4 | Should tenants be able to mark custom roles tenant-wide ("all stores" roles)? | Open. Today only platform `tenant_admin` can be held at the root; adding `is_tenant_wide` to `TenantRoleCreate` / update is a small backend change plus a frontend prompt update |
+
+**Later prompts (not in this one):** the `TenantBUMixin` read filter, a business unit admin API
+(create / rename / deactivate stores, root cannot be deleted, `max_business_units`), store
+filters on reports, store-owned (inventory) tables, and the `email` / `crm` / `flow` / `wf`
+schemas plus the eight `email.*` triggers in dev3.

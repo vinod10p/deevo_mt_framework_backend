@@ -257,4 +257,4 @@ Errors:
 
 Store management screens (create / rename / close stores), store filters on reports and
 transaction screens, store-owned data rules, portal store UI, and making custom roles
-tenant-wide (backend open item Q1).
+tenant-wide (backend open item Q4).
